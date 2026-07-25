@@ -7,7 +7,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(async ({ mode }) => ({
   plugins: [
     tanstackRouter({
       target: "react",
@@ -23,10 +23,26 @@ export default defineConfig(async () => ({
     react(),
   ],
   resolve: {
-    alias: {
-      "@": "/src",
-      "@features-manifest": path.resolve(__dirname, "../preview-features.json"),
-    },
+    alias:
+      mode === "web"
+        ? [
+            {
+              find: /^@tauri-apps\/(?:api|plugin-[^/]+)(?:\/.*)?$/,
+              replacement: path.resolve(__dirname, "src/web/tauri.ts"),
+            },
+            { find: "@", replacement: "/src" },
+            {
+              find: "@features-manifest",
+              replacement: path.resolve(__dirname, "../preview-features.json"),
+            },
+          ]
+        : {
+            "@": "/src",
+            "@features-manifest": path.resolve(
+              __dirname,
+              "../preview-features.json",
+            ),
+          },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

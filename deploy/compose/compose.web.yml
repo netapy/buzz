@@ -1,0 +1,5 @@
+services:
+  caddy:
+    volumes:
+      - ${BUZZ_WEB_DIR:?set BUZZ_WEB_DIR}:/srv/buzz/web:ro
+      - ${BUZZ_WEB_CADDYFILE:-./Caddyfile.web}:/etc/caddy/Caddyfile:ro

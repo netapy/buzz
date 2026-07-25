@@ -1,0 +1,49 @@
+{$BUZZ_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Content-Security-Policy "default-src 'self'; connect-src 'self' https: wss:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; style-src 'self' 'unsafe-inline'; script-src https://{$BUZZ_DOMAIN}/assets/ 'wasm-unsafe-eval' 'sha256-FEr3xzKZbTqZkS1G5nr1rbpWqGWh9+WBhZhkaU0G0gQ='; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	handle /pair {
+		reverse_proxy pairing:5000
+	}
+
+	@relay_socket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @relay_socket {
+		reverse_proxy relay:3000
+	}
+
+	@nip11 header Accept *application/nostr+json*
+	handle @nip11 {
+		reverse_proxy relay:3000
+	}
+
+	@web_asset file {
+		root /srv/buzz/web
+		try_files {path}
+	}
+	handle @web_asset {
+		root * /srv/buzz/web
+		file_server
+	}
+
+	@web_route header Accept *text/html*
+	handle @web_route {
+		root * /srv/buzz/web
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		reverse_proxy relay:3000
+	}
+}

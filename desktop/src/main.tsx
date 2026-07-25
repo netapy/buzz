@@ -109,6 +109,10 @@ async function installE2eBridgeIfConfigured() {
 }
 
 async function bootstrap() {
+  if (import.meta.env.MODE === "web") {
+    const { initializeBrowserIdentity } = await import("@/web/tauri");
+    await initializeBrowserIdentity();
+  }
   resetDevWebviewStateFromUrl();
   configureDevE2eBridgeFromUrl();
   recoverLocalStorageQuotaOnStartup();

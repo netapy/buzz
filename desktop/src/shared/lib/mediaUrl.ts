@@ -265,6 +265,8 @@ export function mediaProxyUrl(port: number, mediaPath: string): string {
 export function rewriteRelayUrl(url: string): string {
   const m = RELAY_MEDIA_RE.exec(url);
   if (!m) return url;
+  if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window))
+    return url;
 
   // Only proxy URLs that belong to our relay. External Blossom URLs
   // (different origin) pass through unchanged — they work fine via WKWebView.
