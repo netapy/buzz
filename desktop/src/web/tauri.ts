@@ -585,6 +585,18 @@ const STARTER_CHANNELS = [
   },
 ] as const;
 
+function isStarterChannel(
+  channel: ReturnType<typeof rawChannel>,
+  spec: (typeof STARTER_CHANNELS)[number],
+) {
+  return (
+    channel.name.trim().toLowerCase() === spec.name &&
+    channel.channel_type === "stream" &&
+    channel.visibility === "open" &&
+    channel.archived_at === null
+  );
+}
+
 async function starterChannelId(slug: string) {
   const namespace = Uint8Array.from(
     "3ce33bea8f095f1b9c858a7d2659e6b0".match(/../g) ?? [],
@@ -611,7 +623,7 @@ async function ensureRawStarterChannels() {
   const ids: string[] = [];
 
   for (const spec of STARTER_CHANNELS) {
-    if (channels.some((channel) => channel.name === spec.name)) continue;
+    if (channels.some((channel) => isStarterChannel(channel, spec))) continue;
     const id = await starterChannelId(spec.slug);
     ids.push(id);
     try {
@@ -640,7 +652,7 @@ async function ensureRawStarterChannels() {
     }
     if (
       STARTER_CHANNELS.every((spec) =>
-        channels.some((channel) => channel.name === spec.name),
+        channels.some((channel) => isStarterChannel(channel, spec)),
       )
     )
       break;
@@ -649,13 +661,15 @@ async function ensureRawStarterChannels() {
 
   if (
     !STARTER_CHANNELS.every((spec) =>
-      channels.some((channel) => channel.name === spec.name),
+      channels.some((channel) => isStarterChannel(channel, spec)),
     )
   )
     channels = await getRawChannels();
 
   for (const spec of STARTER_CHANNELS) {
-    const channel = channels.find((candidate) => candidate.name === spec.name);
+    const channel = channels.find((candidate) =>
+      isStarterChannel(candidate, spec),
+    );
     if (!channel)
       throw new Error("Starter channels were not available after setup");
     if (!channel.is_member) {
@@ -917,7 +931,7 @@ export async function invoke<T>(
       const channelId = crypto.randomUUID();
       const tags = [
         ["h", channelId],
-        ["name", String(args.name).trim().toLowerCase()],
+        ["name", String(args.name).trim()],
         ["visibility", String(args.visibility)],
         ["channel_type", String(args.channelType)],
       ];
@@ -951,7 +965,7 @@ export async function invoke<T>(
       const input = args.input as Record<string, unknown>;
       const tags = [["h", String(input.channelId)]];
       if (input.name !== undefined)
-        tags.push(["name", String(input.name).trim().toLowerCase()]);
+        tags.push(["name", String(input.name).trim()]);
       if (input.description !== undefined)
         tags.push(["about", String(input.description)]);
       if (input.visibility !== undefined)
