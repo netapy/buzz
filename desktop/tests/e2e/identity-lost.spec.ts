@@ -1,8 +1,49 @@
 import { hexToBytes } from "@noble/hashes/utils.js";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { nsecEncode } from "nostr-tools/nip19";
 
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
+
+type VaultMetadata = {
+  ciphertext: number[];
+  extractable: boolean;
+  fields: string[];
+  ivLength: number;
+  keyAlgorithm: string;
+  keyUsages: KeyUsage[];
+  pubkey: string;
+};
+
+async function readVault(page: Page): Promise<VaultMetadata> {
+  return page.evaluate(
+    () =>
+      new Promise<VaultMetadata>((resolve, reject) => {
+        const open = indexedDB.open("buzz-desktop-web-vault");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const database = open.result;
+          const request = database
+            .transaction("identity", "readonly")
+            .objectStore("identity")
+            .get("current");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const record = request.result;
+            database.close();
+            resolve({
+              ciphertext: [...new Uint8Array(record.ciphertext)],
+              extractable: record.wrappingKey.extractable,
+              fields: Object.keys(record).sort(),
+              ivLength: record.iv.byteLength,
+              keyAlgorithm: record.wrappingKey.algorithm.name,
+              keyUsages: [...record.wrappingKey.usages].sort(),
+              pubkey: record.pubkey,
+            });
+          };
+        };
+      }),
+  );
+}
 
 test("normal first launch uses the already-persisted identity", async ({
   page,
@@ -215,4 +256,72 @@ test("locked screen relaunch button records the process-restart invoke", async (
       ),
     )
     .toBe(true);
+});
+
+test.describe("browser identity vault", () => {
+  test.use({ serviceWorkers: "block" });
+  test.skip(
+    process.env.BUZZ_WEB_BUILD !== "1",
+    "requires the real build:web adapter",
+  );
+
+  test("encrypts the key, survives reload, and fails closed", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () =>
+            (await indexedDB.databases()).some(
+              (database) => database.name === "buzz-desktop-web-vault",
+            ),
+          ),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+
+    const before = await readVault(page);
+    expect(before).toMatchObject({
+      extractable: false,
+      fields: ["ciphertext", "id", "iv", "pubkey", "wrappingKey"],
+      ivLength: 12,
+      keyAlgorithm: "AES-GCM",
+      keyUsages: ["decrypt", "encrypt"],
+      pubkey: /^[0-9a-f]{64}$/,
+    });
+    expect(before.ciphertext).toHaveLength(48);
+
+    await page.reload();
+    const after = await readVault(page);
+    expect(after.pubkey).toBe(before.pubkey);
+    expect(after.ciphertext).toEqual(before.ciphertext);
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open("buzz-desktop-web-vault");
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const database = open.result;
+            const transaction = database.transaction("identity", "readwrite");
+            const store = transaction.objectStore("identity");
+            const request = store.get("current");
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () =>
+              store.put({ ...request.result, wrappingKey: null });
+            transaction.oncomplete = () => {
+              database.close();
+              resolve();
+            };
+            transaction.onerror = () => reject(transaction.error);
+          };
+        }),
+    );
+
+    await page.reload();
+    await expect(page.getByTestId("keyring-locked")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
 });

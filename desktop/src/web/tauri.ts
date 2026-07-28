@@ -147,6 +147,34 @@ function relayHttpUrl(): string {
 
 let nextSocketId = 1;
 const sockets = new Map<number, WebSocket>();
+let relayReadWindowStartedAt = 0;
+let relayReadCount = 0;
+
+async function paceRelayRead(frame: string): Promise<void> {
+  let type: unknown;
+  try {
+    [type] = JSON.parse(frame);
+  } catch {
+    return;
+  }
+  if (type !== "REQ" && type !== "COUNT") return;
+
+  // Relay allows 50 frames per 5s; reserve 10 for writes and presence.
+  while (true) {
+    const now = Date.now();
+    if (now - relayReadWindowStartedAt >= 5_000) {
+      relayReadWindowStartedAt = now;
+      relayReadCount = 0;
+    }
+    if (relayReadCount < 40) {
+      relayReadCount++;
+      return;
+    }
+    await new Promise((resolve) =>
+      window.setTimeout(resolve, relayReadWindowStartedAt + 5_000 - now),
+    );
+  }
+}
 
 type RelayEvent = {
   id: string;
@@ -692,9 +720,10 @@ export async function invoke<T>(
       const socket = sockets.get(Number(args.id));
       if (!socket) throw new Error("WebSocket is closed.");
       const message = args.message as { type?: string; data?: string };
-      socket.send(
-        message?.type === "Text" ? String(message.data) : String(message),
-      );
+      const frame =
+        message?.type === "Text" ? String(message.data) : String(message);
+      await paceRelayRead(frame);
+      socket.send(frame);
       return undefined as T;
     }
     case "plugin:websocket|disconnect":
