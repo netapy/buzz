@@ -9,7 +9,7 @@ import {
 import { attachManagedAgentToChannel } from "@/features/agents/channelAgents";
 import {
   coalesceAgentAutocompleteCandidates,
-  isAgentIdentityInManagedList,
+  isAgentIdentityKnown,
 } from "@/features/agents/lib/agentAutocompleteEligibility";
 import { useIsArchivedPredicate } from "@/features/identity-archive/hooks";
 import { useClassifiedMembers } from "@/features/channels/lib/useClassifiedMembers";
@@ -271,7 +271,12 @@ export function MembersSidebar({
         .map((member) => member.displayName?.trim().toLowerCase())
         .filter((label): label is string => Boolean(label)),
     );
-    const managedAgentPubkeys = new Set(managedAgentsByPubkey.keys());
+    const knownAgentPubkeys = new Set([
+      ...managedAgentsByPubkey.keys(),
+      ...(relayAgentsQuery.data ?? []).map((agent) =>
+        normalizePubkey(agent.pubkey),
+      ),
+    ]);
 
     const addCandidate = (candidate: AddMemberSearchCandidate) => {
       const pubkey = normalizePubkey(candidate.pubkey);
@@ -282,7 +287,7 @@ export function MembersSidebar({
           )) ||
         memberPubkeys.has(pubkey) ||
         isArchivedDiscovery(pubkey) ||
-        !isAgentIdentityInManagedList(candidate, managedAgentPubkeys)
+        !isAgentIdentityKnown(candidate, knownAgentPubkeys)
       ) {
         return;
       }
