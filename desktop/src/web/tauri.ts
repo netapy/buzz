@@ -147,7 +147,7 @@ function relayHttpUrl(): string {
 
 let nextSocketId = 1;
 const sockets = new Map<number, WebSocket>();
-let nextRelayLiveReadAt = Date.now() + 5_000;
+let nextRelayLiveReadAt = Date.now() + 6_000;
 
 async function paceRelayRead(frame: string): Promise<void> {
   let type: unknown, subscriptionId: unknown;
