@@ -148,26 +148,26 @@ function relayHttpUrl(): string {
 let nextSocketId = 1;
 const sockets = new Map<number, WebSocket>();
 let relayReadWindowStartedAt = 0;
-let relayReadCount = 0;
+let relayLiveReadCount = 0;
 
 async function paceRelayRead(frame: string): Promise<void> {
-  let type: unknown;
+  let type: unknown, subscriptionId: unknown;
   try {
-    [type] = JSON.parse(frame);
+    [type, subscriptionId] = JSON.parse(frame);
   } catch {
     return;
   }
-  if (type !== "REQ" && type !== "COUNT") return;
+  if (type !== "REQ" || !String(subscriptionId).startsWith("live-")) return;
 
-  // Relay allows 50 frames per 5s; reserve 10 for writes and presence.
+  // Pace background subscriptions while leaving room for interactive history.
   while (true) {
     const now = Date.now();
     if (now - relayReadWindowStartedAt >= 5_000) {
       relayReadWindowStartedAt = now;
-      relayReadCount = 0;
+      relayLiveReadCount = 0;
     }
-    if (relayReadCount < 40) {
-      relayReadCount++;
+    if (relayLiveReadCount < 25) {
+      relayLiveReadCount++;
       return;
     }
     await new Promise((resolve) =>
