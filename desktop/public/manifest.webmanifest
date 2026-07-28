@@ -8,7 +8,7 @@
   "theme_color": "#000000",
   "icons": [
     {
-      "src": "/buzz.svg",
+      "src": "/buzz.svg?v=20260728",
       "sizes": "any",
       "type": "image/svg+xml"
     }
