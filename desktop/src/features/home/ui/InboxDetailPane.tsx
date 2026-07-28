@@ -388,14 +388,13 @@ function InboxMessageDetailPane({
   const composerParentEventId =
     replyTarget?.id ??
     (isDirectMessage ? null : (capturedDefaultParentId ?? item.id));
-  const composerReplyTarget =
-    replyTarget && replyTarget.id !== item.id
-      ? {
-          author: replyTarget.authorLabel,
-          body: replyTarget.content,
-          id: replyTarget.id,
-        }
-      : null;
+  const composerReplyTarget = replyTarget
+    ? {
+        author: replyTarget.authorLabel,
+        body: replyTarget.content,
+        id: replyTarget.id,
+      }
+    : null;
   const channelContextName = contextChannelName ?? item.channelLabel;
   const composerChannelType =
     item.item.channelType === "dm" ||

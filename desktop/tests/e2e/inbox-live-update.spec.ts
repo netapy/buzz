@@ -22,6 +22,7 @@ import type { RelayEvent } from "../../src/shared/api/types";
  */
 
 const GENERAL_CHANNEL_ID = "9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50";
+const ALICE_DM_CHANNEL_ID = "f48efb06-0c93-5025-aac9-2e646bb6bfa8";
 
 type MockWindow = Window & {
   __BUZZ_E2E_EMIT_MOCK_MESSAGE__?: (input: {
@@ -70,6 +71,10 @@ type MockWindow = Window & {
   __BUZZ_E2E_RELEASE_GET_EVENT__?: () => number;
   /** Running count of get_event invocations since installMockBridge. */
   __BUZZ_E2E_GET_EVENT_CALL_COUNT__?: number;
+  __BUZZ_E2E_HAS_MOCK_LIVE_SUBSCRIPTION__?: (input: {
+    channelName: string;
+    kind?: number;
+  }) => boolean;
 };
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -154,6 +159,7 @@ async function getLastSendPayload(page: import("@playwright/test").Page) {
           parentEventId?: string | null;
           content?: string;
           channelId?: string;
+          mentionPubkeys?: string[];
         } | null;
       }
     }
@@ -278,6 +284,123 @@ async function injectNewerSibling(
 // ─── tests ────────────────────────────────────────────────────────────────
 
 test.describe("inbox stable-conversation regressions", () => {
+  test("DM reply addresses the participant and renders transient live reactions", async ({
+    page,
+  }) => {
+    await installMockBridge(page);
+    await page.goto("/");
+    await expect(getListPane(page)).toBeVisible();
+    await waitForBridgeReady(page);
+
+    const message = await page.evaluate(
+      ({ channelId, senderPubkey }) => {
+        const win = window as MockWindow;
+        const emit = win.__BUZZ_E2E_EMIT_MOCK_MESSAGE__;
+        const push = win.__BUZZ_E2E_PUSH_MOCK_FEED_ITEM__;
+        if (!emit || !push) throw new Error("Bridge helpers not ready");
+        const event = emit({
+          channelName: "alice-tyler",
+          content: "Inbox DM requiring a reply.",
+          id: "09".repeat(32),
+          pubkey: senderPubkey,
+        });
+        push({
+          category: "activity",
+          channel_id: channelId,
+          channel_name: "alice-tyler",
+          content: event.content,
+          created_at: event.created_at,
+          id: event.id,
+          kind: event.kind,
+          pubkey: event.pubkey,
+          tags: event.tags,
+        });
+        return event;
+      },
+      {
+        channelId: ALICE_DM_CHANNEL_ID,
+        senderPubkey: TEST_IDENTITIES.alice.pubkey,
+      },
+    );
+
+    await page.getByTestId(`home-inbox-item-${message.id}`).click();
+    const detail = getDetailPane(page);
+    const selectedMessage = detail.getByTestId("home-inbox-selected-message");
+    await expect(selectedMessage).toContainText(message.content);
+
+    await selectedMessage.hover();
+    await selectedMessage
+      .getByRole("button", { name: "Reply", exact: true })
+      .click();
+    await expect(detail.getByTestId("reply-target")).toContainText(
+      message.content,
+    );
+
+    await clearCommandPayloads(page);
+    await detail.getByTestId("message-input").fill("Reply from Inbox");
+    await detail.getByRole("button", { name: /send/i }).click();
+    await page.waitForFunction(() =>
+      ((window as MockWindow).__BUZZ_E2E_COMMAND_PAYLOADS__ ?? []).some(
+        (payload) => payload.command === "send_channel_message",
+      ),
+    );
+    const sent = await getLastSendPayload(page);
+    expect(sent?.channelId).toBe(ALICE_DM_CHANNEL_ID);
+    expect(sent?.parentEventId).toBe(message.id);
+    expect(sent?.mentionPubkeys).toEqual([TEST_IDENTITIES.alice.pubkey]);
+
+    await page.waitForFunction(
+      () =>
+        (window as MockWindow).__BUZZ_E2E_HAS_MOCK_LIVE_SUBSCRIPTION__?.({
+          channelName: "alice-tyler",
+          kind: 7,
+        }) === true,
+    );
+    const reaction = await page.evaluate(
+      ({ messageId, senderPubkey }) => {
+        const emit = (window as MockWindow).__BUZZ_E2E_EMIT_MOCK_MESSAGE__;
+        if (!emit) throw new Error("Bridge helper not ready");
+        return emit({
+          channelName: "alice-tyler",
+          content: "👀",
+          extraTags: [["e", messageId]],
+          id: "19".repeat(32),
+          kind: 7,
+          pubkey: senderPubkey,
+        });
+      },
+      { messageId: message.id, senderPubkey: TEST_IDENTITIES.alice.pubkey },
+    );
+    await expect(
+      selectedMessage.getByRole("button", {
+        name: "Toggle 👀 reaction",
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await page.evaluate(
+      ({ reactionId, senderPubkey }) => {
+        const emit = (window as MockWindow).__BUZZ_E2E_EMIT_MOCK_MESSAGE__;
+        if (!emit) throw new Error("Bridge helper not ready");
+        emit({
+          channelName: "alice-tyler",
+          content: "",
+          extraTags: [["e", reactionId]],
+          id: "29".repeat(32),
+          kind: 5,
+          pubkey: senderPubkey,
+        });
+      },
+      { reactionId: reaction.id, senderPubkey: TEST_IDENTITIES.alice.pubkey },
+    );
+    await expect(
+      selectedMessage.getByRole("button", {
+        name: "Toggle 👀 reaction",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+  });
+
   test("scroll and focused draft preserved; new representative row selected when live sibling displaces anchor", async ({
     page,
   }) => {

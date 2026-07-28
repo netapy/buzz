@@ -48,11 +48,13 @@ import { InboxListPane } from "@/features/home/ui/InboxListPane";
 import { HomePersonalInboxDetail } from "@/features/home/ui/HomePersonalInboxDetail";
 import {
   useChannelMessagesQuery,
+  useChannelSubscription,
   useToggleReactionMutation,
 } from "@/features/messages/hooks";
 import { collectMessageMentionPubkeys } from "@/features/messages/lib/formatTimelineMessages";
 import { formatTime } from "@/features/messages/lib/dateFormatters";
 import { splitOutgoingTags } from "@/features/messages/lib/imetaMediaMarkdown";
+import { messageMentionPubkeys } from "@/features/messages/lib/messageMentionPubkeys";
 import { getThreadReference } from "@/features/messages/lib/threading";
 import { useUsersBatchQuery } from "@/features/profile/hooks";
 import { useRelaySelfQuery } from "@/features/moderation/hooks";
@@ -288,6 +290,7 @@ export function HomeView({
     homeInboxWidthPx < AUXILIARY_PANEL_SINGLE_COLUMN_BREAKPOINT_PX;
 
   const channelMessagesQuery = useChannelMessagesQuery(selectedChannel);
+  useChannelSubscription(selectedChannel);
   const toggleReactionMutation = useToggleReactionMutation();
   const channelMessages = channelMessagesQuery.data;
   const threadContext = useInboxThreadContext(
@@ -804,12 +807,20 @@ export function HomeView({
                     emojiTags,
                     mentionTags,
                   } = splitOutgoingTags(mediaTags);
+                  const recipientPubkeys =
+                    selectedChannel && currentPubkey
+                      ? messageMentionPubkeys(
+                          selectedChannel,
+                          currentPubkey,
+                          mentionPubkeys,
+                        )
+                      : mentionPubkeys;
                   const result = await sendChannelMessage(
                     channelId,
                     content,
                     parentEventId,
                     imetaTags,
-                    mentionPubkeys,
+                    recipientPubkeys,
                     undefined,
                     emojiTags,
                     mentionTags,

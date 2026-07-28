@@ -8,7 +8,11 @@ import {
 import { formatTimelineMessages } from "@/features/messages/lib/formatTimelineMessages";
 import type { UserProfileLookup } from "@/features/profile/lib/identity";
 import type { Channel, RelayEvent } from "@/shared/api/types";
-import { KIND_REACTION } from "@/shared/constants/kinds";
+import {
+  KIND_DELETION,
+  KIND_NIP29_DELETE_EVENT,
+  KIND_REACTION,
+} from "@/shared/constants/kinds";
 
 type UseHomeInboxContextMessagesOptions = {
   channelMessages?: RelayEvent[];
@@ -40,11 +44,19 @@ export function useHomeInboxContextMessages({
 
     const eventById = new Map(events.map((event) => [event.id, event]));
     const contextEventIds = new Set(eventById.keys());
-    const contextReactions = [
+    const contextAuxEvents = [
       ...(channelMessages ?? []),
       ...reactionEvents,
     ].filter((event) => {
-      if (event.kind !== KIND_REACTION) return false;
+      if (
+        event.kind === KIND_DELETION ||
+        event.kind === KIND_NIP29_DELETE_EVENT
+      ) {
+        return true;
+      }
+      if (event.kind !== KIND_REACTION) {
+        return false;
+      }
       const targetId = getReactionTargetId(event.tags);
       return Boolean(targetId && contextEventIds.has(targetId));
     });
@@ -52,7 +64,7 @@ export function useHomeInboxContextMessages({
       ? (profiles?.[currentPubkey.toLowerCase()]?.avatarUrl ?? null)
       : null;
     const timelineMessages = formatTimelineMessages(
-      [...events, ...contextReactions],
+      [...events, ...contextAuxEvents],
       selectedChannel,
       currentPubkey,
       currentUserAvatarUrl,
