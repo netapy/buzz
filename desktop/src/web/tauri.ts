@@ -1,3 +1,6 @@
+import { schnorr } from "@noble/curves/secp256k1.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { hexToBytes } from "@noble/hashes/utils.js";
 import {
   finalizeEvent,
   generateSecretKey,
@@ -250,6 +253,44 @@ function tag(event: RelayEvent, name: string): string | null {
   return event.tags.find((candidate) => candidate[0] === name)?.[1] ?? null;
 }
 
+function nipOaOwner(event: RelayEvent): string | null {
+  for (const [name, owner, conditions, signature, ...extra] of event.tags) {
+    if (
+      name !== "auth" ||
+      extra.length ||
+      !/^[0-9a-f]{64}$/.test(owner) ||
+      !/^[0-9a-f]{128}$/.test(signature) ||
+      owner === event.pubkey
+    )
+      continue;
+    const clauses = conditions
+      ? conditions
+          .split("&")
+          .map((clause) => /^(kind=|created_at[<>])(0|[1-9]\d*)$/.exec(clause))
+      : [];
+    if (
+      clauses.some(
+        (clause) =>
+          !clause ||
+          Number(clause[2]) > (clause[1] === "kind=" ? 65_535 : 4_294_967_295),
+      )
+    )
+      continue;
+    try {
+      const message = sha256(
+        encoder.encode(
+          `nostr:agent-auth:${event.pubkey.toLowerCase()}:${conditions}`,
+        ),
+      );
+      if (schnorr.verify(hexToBytes(signature), message, hexToBytes(owner)))
+        return owner;
+    } catch {
+      // Invalid tags are ordinary human profiles.
+    }
+  }
+  return null;
+}
+
 async function resolveThread(parentEventId: string) {
   const [parent] = await relayQuery([
     {
@@ -272,13 +313,14 @@ async function resolveThread(parentEventId: string) {
 
 function rawProfile(event: RelayEvent | undefined, pubkey: string) {
   const content = event ? JSON.parse(event.content || "{}") : {};
+  const ownerPubkey = event ? nipOaOwner(event) : null;
   return {
     pubkey,
     display_name: content.display_name ?? content.name ?? null,
     avatar_url: content.picture ?? null,
     about: content.about ?? null,
     nip05_handle: content.nip05 ?? null,
-    owner_pubkey: null,
+    owner_pubkey: ownerPubkey,
     has_profile_event: event != null,
   };
 }
@@ -867,8 +909,8 @@ export async function invoke<T>(
                   name: profile.display_name,
                   avatar_url: profile.avatar_url,
                   nip05_handle: profile.nip05_handle,
-                  owner_pubkey: null,
-                  is_agent: false,
+                  owner_pubkey: profile.owner_pubkey,
+                  is_agent: profile.owner_pubkey != null,
                 },
               ];
             }),
@@ -896,8 +938,8 @@ export async function invoke<T>(
             display_name: profile.display_name,
             avatar_url: profile.avatar_url,
             nip05_handle: profile.nip05_handle,
-            owner_pubkey: null,
-            is_agent: false,
+            owner_pubkey: profile.owner_pubkey,
+            is_agent: profile.owner_pubkey != null,
           };
         }),
         next_cursor: events.length >= limit ? String(page + 1) : null,
