@@ -109,6 +109,18 @@ export function ChannelRouteScreen({
   const channels = channelsQuery.data ?? [];
   const activeChannel =
     channels.find((channel) => channel.id === channelId) ?? null;
+  React.useEffect(() => {
+    if (import.meta.env.MODE !== "web" || !activeChannel) return;
+    const baseTitle = document.title;
+    const channelTitle =
+      activeChannel.channelType === "dm"
+        ? activeChannel.name
+        : `#${activeChannel.name}`;
+    document.title = `${channelTitle} | ${baseTitle}`;
+    return () => {
+      document.title = baseTitle;
+    };
+  }, [activeChannel]);
   const [targetMessageEvents, setTargetMessageEvents] = React.useState<
     RelayEvent[]
   >(() => {
