@@ -258,6 +258,12 @@ impl RespondToArg {
 
 #[derive(Subcommand)]
 pub enum AgentsCmd {
+    /// Replace this agent's kind:10100 directory profile with a complete JSON object
+    SetProfile {
+        /// Complete profile JSON; use '-' to read from stdin
+        #[arg(long)]
+        content: String,
+    },
     /// Open a prefilled create-agent form in the owner's Buzz Desktop
     DraftCreate {
         /// Current channel UUID; the new agent is added here after save
@@ -1912,6 +1918,7 @@ mod tests {
                 "archived",
                 "draft-create",
                 "draft-update",
+                "set-profile",
                 "unarchive"
             ]
         );
@@ -2038,7 +2045,7 @@ mod tests {
     #[test]
     fn subcommand_counts_are_stable() {
         let expected: Vec<(&str, usize)> = vec![
-            ("agents", 5),
+            ("agents", 6),
             ("canvas", 2),
             ("channels", 16),
             ("dms", 4),

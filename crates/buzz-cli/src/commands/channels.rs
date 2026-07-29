@@ -1001,6 +1001,23 @@ pub async fn cmd_remove_channel_member(
     Ok(())
 }
 
+fn merge_channel_add_policy(content: Option<&str>, policy: &str) -> Result<String, CliError> {
+    let mut profile = content
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|e| CliError::Other(format!("invalid existing agent profile: {e}")))?
+        .unwrap_or_else(|| serde_json::json!({}));
+    profile
+        .as_object_mut()
+        .ok_or_else(|| CliError::Other("existing agent profile is not a JSON object".into()))?
+        .insert(
+            "channel_add_policy".into(),
+            serde_json::Value::String(policy.into()),
+        );
+    serde_json::to_string(&profile)
+        .map_err(|e| CliError::Other(format!("failed to serialize agent profile: {e}")))
+}
+
 /// Set the channel addition policy — sign and submit a kind:10100 (agent profile) event.
 pub async fn cmd_set_add_policy(client: &BuzzClient, policy: &str) -> Result<(), CliError> {
     match policy {
@@ -1032,7 +1049,24 @@ pub async fn cmd_set_add_policy(client: &BuzzClient, policy: &str) -> Result<(),
         }
     }
 
-    let content = serde_json::json!({ "channel_add_policy": policy }).to_string();
+    let filter = serde_json::json!({
+        "kinds": [buzz_sdk::kind::KIND_AGENT_PROFILE],
+        "authors": [client.keys().public_key().to_hex()],
+        "limit": 1,
+    });
+    let raw = client.query(&filter).await?;
+    let events: Vec<serde_json::Value> = serde_json::from_str(&raw)
+        .map_err(|e| CliError::Other(format!("invalid agent profile query response: {e}")))?;
+    let current = events
+        .first()
+        .map(|event| {
+            event
+                .get("content")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| CliError::Other("existing agent profile has no content".into()))
+        })
+        .transpose()?;
+    let content = merge_channel_add_policy(current, policy)?;
     use nostr::{EventBuilder, Kind};
     let builder = EventBuilder::new(
         Kind::Custom(buzz_sdk::kind::KIND_AGENT_PROFILE as u16),
@@ -1177,9 +1211,9 @@ pub async fn dispatch_canvas(cmd: crate::CanvasCmd, client: &BuzzClient) -> Resu
 mod tests {
     use super::{
         apply_cardinality_rule, build_template_report, cmd_set_add_policy,
-        finalize_roster_resolution, name_matches, resolve_roster_with_archive_filter,
-        validate_ttl_seconds, ArchivedExclusion, ChannelSummary, ResolvedAgent, RosterResolution,
-        SkippedSlug,
+        finalize_roster_resolution, merge_channel_add_policy, name_matches,
+        resolve_roster_with_archive_filter, validate_ttl_seconds, ArchivedExclusion,
+        ChannelSummary, ResolvedAgent, RosterResolution, SkippedSlug,
     };
     use crate::client::BuzzClient;
     use crate::CliError;
@@ -1340,6 +1374,38 @@ mod tests {
             result.is_ok(),
             "empty allowed list should permit any policy: {result:?}"
         );
+    }
+
+    #[test]
+    fn set_add_policy_preserves_existing_agent_profile() {
+        let profile = serde_json::json!({
+            "name": "Beanie Post Bot",
+            "channels": ["Communication"],
+            "respond_to": "anyone",
+            "channel_add_policy": "anyone",
+        });
+        let merged = merge_channel_add_policy(Some(&profile.to_string()), "owner_only").unwrap();
+        let merged: serde_json::Value = serde_json::from_str(&merged).unwrap();
+
+        assert_eq!(merged["name"], "Beanie Post Bot");
+        assert_eq!(merged["channels"], serde_json::json!(["Communication"]));
+        assert_eq!(merged["respond_to"], "anyone");
+        assert_eq!(merged["channel_add_policy"], "owner_only");
+    }
+
+    #[test]
+    fn set_add_policy_without_profile_creates_policy_only() {
+        let merged = merge_channel_add_policy(None, "nobody").unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&merged).unwrap(),
+            serde_json::json!({ "channel_add_policy": "nobody" })
+        );
+    }
+
+    #[test]
+    fn set_add_policy_rejects_invalid_existing_profile() {
+        assert!(merge_channel_add_policy(Some("[]"), "owner_only").is_err());
+        assert!(merge_channel_add_policy(Some("{"), "owner_only").is_err());
     }
 
     // --- Integration test: full env-var → cmd_set_add_policy() path ---
