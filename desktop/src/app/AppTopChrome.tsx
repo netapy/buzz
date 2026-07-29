@@ -1,4 +1,5 @@
 import * as React from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import {
   ChevronLeft,
   ChevronRight,
@@ -74,12 +75,15 @@ export function AppTopChrome({
   // Fixed px on purpose: the native traffic lights do not scale with the app's
   // Cmd +/- text zoom (rem), so rem-based clearance shrinks under them when
   // zoomed out. This is a deliberate exception to the rem-first rule.
-  const macChrome = isMacPlatform() && !isFullscreen;
-  const navRowPaddingClass = macChrome
-    ? hasCommunityRail
-      ? "pl-[32px]"
-      : "pl-[80px]"
-    : "pl-3";
+  const nativeChrome = isTauri();
+  const macChrome = nativeChrome && isMacPlatform() && !isFullscreen;
+  const navRowPaddingClass = nativeChrome
+    ? macChrome
+      ? hasCommunityRail
+        ? "pl-[32px]"
+        : "pl-[80px]"
+      : "pl-3"
+    : "pl-0";
   const navRowAlignmentClass = macChrome ? "translate-y-[3px]" : null;
 
   React.useEffect(() => {
