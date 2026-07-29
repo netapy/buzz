@@ -74,6 +74,30 @@ async function dragSidebarRail(page: Page, deltaX: number) {
   await page.mouse.up();
 }
 
+test("touch swipe scrolls the channel sidebar", async ({ context, page }) => {
+  await page.setViewportSize({ width: 1280, height: 500 });
+  const client = await context.newCDPSession(page);
+  await page.goto("/");
+
+  const scroll = page.locator('[data-sidebar="content"]');
+  const row = page.locator(".touch-pan-y").first();
+  const box = await row.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await client.send("Input.synthesizeScrollGesture", {
+    x,
+    y,
+    yDistance: -100,
+    gestureSourceType: "touch",
+  });
+
+  await expect
+    .poll(() => scroll.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+});
+
 test("add community starts with create and join choices", async ({ page }) => {
   await installMockBridge(page, {});
   await page.goto("/");

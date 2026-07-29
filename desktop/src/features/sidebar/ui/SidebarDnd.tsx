@@ -2,7 +2,7 @@
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
   pointerWithin,
   useDraggable,
   useDroppable,
@@ -44,7 +44,7 @@ export function DraggableChannelRow({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      className={cn("touch-none", isDragging && "opacity-30")}
+      className={cn("touch-pan-y", isDragging && "opacity-30")}
     >
       {children}
     </div>
@@ -192,7 +192,7 @@ export function SidebarDndContext({
   const [activeDragItem, setActiveDragItem] =
     React.useState<SidebarDragItem | null>(null);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
   );
 
   const handleDragStart = React.useCallback(
