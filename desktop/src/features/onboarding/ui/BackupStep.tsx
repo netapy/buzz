@@ -86,7 +86,7 @@ export function BackupStep({ direction, onBack, onNext }: BackupStepProps) {
           Your unique identity key has been created
         </h1>
         <p className="mt-5 text-sm leading-6 text-foreground/80">
-          This key is stored securely on this device, but save it some place
+          This key is stored in your system keychain, but save it some place
           safe in case you ever need to restore your account.
         </p>
       </div>
