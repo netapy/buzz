@@ -215,11 +215,9 @@ test("fromRawAcpRuntimeCatalogEntry env round-trips through edit payload shape",
 
 const originalLocation = globalThis.location;
 globalThis.location = { host: "buzz.test", protocol: "https:" };
-const {
-  archivedPubkeysFromSnapshot,
-  imageUploadDisposition,
-  prepareImageForUpload,
-} = await import("../../web/tauri.ts");
+const { archivedPubkeysFromSnapshot, prepareImageForUpload } = await import(
+  "../../web/tauri.ts"
+);
 
 test("browser archive snapshot accepts only relay-signed pubkeys", async () => {
   const { finalizeEvent, generateSecretKey, getPublicKey } = await import(
@@ -253,75 +251,60 @@ test("browser archive snapshot accepts only relay-signed pubkeys", async () => {
   assert.deepEqual(archivedPubkeysFromSnapshot(snapshot, "cd".repeat(32)), []);
 });
 
-test("browser upload preserves only metadata-free container images", () => {
-  for (const [type, expected, encoded] of [
-    ["image/png", "preserve", "iVBORw0KGgoAAAAAYWNUTAAAAAAAAAAASUVORAAAAAA="],
-    [
-      "image/png",
-      "reject",
-      "iVBORw0KGgoAAAAAYWNUTAAAAAAAAAALdEVYdENvbW1lbnQAR1BTAAAAAAAAAABJRU5EAAAAAA==",
-    ],
-    [
-      "image/png",
-      "preserve",
-      "iVBORw0KGgoAAAAWdEVYdGJ1enpfYWdlbnRfc25hcHNob3QAe30AAAAAAAAAAElFTkQAAAAA",
-    ],
-    [
-      "image/webp",
-      "preserve",
-      "UklGRjQAAABXRUJQQU5JTQYAAAAAAAAAAABBTk1GGgAAAAAAAAAAAAAAAAAAAAAAAABWUDggAQAAAAAA",
-    ],
-    [
-      "image/webp",
-      "reject",
-      "UklGRjwAAABXRUJQQU5JTQYAAAAAAAAAAABBTk1GGgAAAAAAAAAAAAAAAAAAAAAAAABWUDggAQAAAAAARVhJRgAAAAA=",
-    ],
-    [
-      "image/gif",
-      "preserve",
-      "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBADs=",
-    ],
-    [
-      "image/gif",
-      "reject",
-      "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBACH+AUEAOw==",
-    ],
-  ]) {
-    assert.equal(
-      imageUploadDisposition(
-        Uint8Array.from(Buffer.from(encoded, "base64")),
-        type,
-      ),
-      expected,
-    );
-  }
-});
-
-test("browser upload refuses oversized images before allocating a canvas", async () => {
+test("browser upload cleans static images and refuses lossy cleanup", async () => {
   const originalBitmap = globalThis.createImageBitmap;
   const originalDocument = globalThis.document;
-  let closed = false;
-  let canvasCreated = false;
+  const decode = (value) => Uint8Array.from(Buffer.from(value, "base64"));
+  const clean = decode("iVBORw0KGgoAAAAASUVORAAAAAA=");
+  let width = 1;
+  let height = 1;
+  let closed = 0;
+  let canvasCreated = 0;
   globalThis.createImageBitmap = async () => ({
     close: () => {
-      closed = true;
+      closed++;
     },
-    height: 5_000,
-    width: 5_001,
+    get height() {
+      return height;
+    },
+    get width() {
+      return width;
+    },
   });
   globalThis.document = {
     createElement: () => {
-      canvasCreated = true;
-      return {};
+      canvasCreated++;
+      return {
+        getContext: () => ({ drawImage: () => {} }),
+        toBlob: (callback) =>
+          callback(new Blob([clean], { type: "image/png" })),
+      };
     },
   };
   try {
+    const dirty = decode(
+      "iVBORw0KGgoAAAALdEVYdENvbW1lbnQAR1BTAAAAAAAAAABJRU5EAAAAAA==",
+    );
+    assert.deepEqual(
+      (await prepareImageForUpload(dirty, "image/png")).data,
+      clean,
+    );
+    await assert.rejects(
+      prepareImageForUpload(
+        decode("iVBORw0KGgoAAAAAYWNUTAAAAAAAAAAASUVORAAAAAA="),
+        "image/png",
+      ),
+      /cannot safely clean/,
+    );
+
+    width = 5_001;
+    height = 5_000;
     await assert.rejects(
       prepareImageForUpload(Uint8Array.from([0xff, 0xd8]), "image/jpeg"),
       /dimensions are too large/,
     );
-    assert.equal(canvasCreated, false);
-    assert.equal(closed, true);
+    assert.equal(canvasCreated, 1);
+    assert.equal(closed, 2);
   } finally {
     globalThis.createImageBitmap = originalBitmap;
     globalThis.document = originalDocument;

@@ -535,193 +535,35 @@ function mimeType(data: Uint8Array, filename = "") {
   );
 }
 
-type ImageUploadDisposition = "preserve" | "sanitize" | "reject";
-
-function uint32(data: Uint8Array, offset: number, littleEndian = false) {
-  if (offset + 4 > data.length) return null;
-  return new DataView(data.buffer, data.byteOffset + offset, 4).getUint32(
-    0,
-    littleEndian,
-  );
-}
-
 function ascii(data: Uint8Array, offset: number, length: number) {
   return String.fromCharCode(...data.subarray(offset, offset + length));
 }
 
-function pngUploadDisposition(data: Uint8Array): ImageUploadDisposition {
-  if (ascii(data, 0, 8) !== "\x89PNG\r\n\x1a\n") return "sanitize";
-  const rendering = new Set([
-    "cHRM",
-    "gAMA",
-    "sBIT",
-    "sRGB",
-    "bKGD",
-    "hIST",
-    "tRNS",
-    "sPLT",
-    "acTL",
-    "fcTL",
-    "fdAT",
-  ]);
-  let offset = 8;
-  let preserve = false;
-  let snapshot = false;
-  let clean = true;
-  let ended = false;
-  while (offset + 12 <= data.length) {
-    const length = uint32(data, offset);
-    if (length === null || offset + 12 + length > data.length) {
-      clean = false;
-      break;
-    }
-    const kind = ascii(data, offset + 4, 4);
-    const end = offset + 12 + length;
-    if (kind === "acTL") preserve = true;
-    if (kind === "tEXt") {
-      const payload = ascii(data, offset + 8, Math.min(length, 20));
-      const allowed: boolean =
-        !snapshot &&
-        (payload.startsWith("buzz_agent_snapshot\0") ||
-          payload.startsWith("buzz_team_snapshot\0"));
-      snapshot ||= allowed;
-      preserve ||= allowed;
-      clean &&= allowed;
-    } else if ((data[offset + 4] & 0x20) !== 0 && !rendering.has(kind)) {
-      clean = false;
-    }
-    offset = end;
-    if (kind === "IEND") {
-      ended = true;
-      break;
-    }
-  }
-  clean &&= ended && offset === data.length;
-  return preserve ? (clean ? "preserve" : "reject") : "sanitize";
-}
-
-function canonicalWebpFrame(data: Uint8Array, offset: number, length: number) {
-  const end = offset + length;
-  if (length < 16 || end > data.length) return false;
-  offset += 16;
-  let alpha = false;
-  let image = false;
-  while (offset < end) {
-    if (offset + 8 > end) return false;
-    const length = uint32(data, offset + 4, true);
-    if (length === null) return false;
-    const kind = ascii(data, offset, 4);
-    offset += 8 + length + (length & 1);
-    if (offset > end) return false;
-    if (kind === "ALPH" && !alpha && !image) alpha = true;
-    else if (kind === "VP8 " && !image) image = true;
-    else if (kind === "VP8L" && !alpha && !image) image = true;
-    else return false;
-  }
-  return image;
-}
-
-function webpUploadDisposition(data: Uint8Array): ImageUploadDisposition {
-  if (
-    data.length < 12 ||
-    ascii(data, 0, 4) !== "RIFF" ||
-    ascii(data, 8, 4) !== "WEBP"
-  )
-    return "sanitize";
-  const declared = uint32(data, 4, true);
-  if (declared === null) return "sanitize";
-  const end = declared + 8;
-  let offset = 12;
-  let animated = false;
-  let clean = end === data.length;
-  while (offset < end && offset + 8 <= data.length) {
-    const length = uint32(data, offset + 4, true);
-    if (length === null) {
-      clean = false;
-      break;
-    }
-    const kind = ascii(data, offset, 4);
-    const payload = offset + 8;
-    const next = payload + length + (length & 1);
-    if (next > end || next > data.length) {
-      clean = false;
-      break;
-    }
-    if (!["VP8 ", "VP8L", "VP8X", "ALPH", "ANIM", "ANMF"].includes(kind))
-      clean = false;
-    if (kind === "VP8X" && ((data[payload] ?? 0) & 0x2c) !== 0) clean = false;
-    if (kind === "ANIM" || kind === "ANMF") animated = true;
-    if (kind === "ANMF" && !canonicalWebpFrame(data, payload, length))
-      clean = false;
-    offset = next;
-  }
-  clean &&= offset === end;
-  return animated ? (clean ? "preserve" : "reject") : "sanitize";
-}
-
-function gifBlocksEnd(data: Uint8Array, offset: number) {
+function imageNeedsOriginal(data: Uint8Array, type: string, filename = "") {
+  if (type === "image/gif" || /\.(?:agent|team)\.png$/i.test(filename))
+    return true;
+  const png = type === "image/png";
+  if (!png && type !== "image/webp") return false;
+  let offset = png ? 8 : 12;
   while (offset < data.length) {
-    const length = data[offset++] ?? 0;
-    if (length === 0) return offset;
-    offset += length;
-    if (offset > data.length) break;
+    const header = png ? 12 : 8;
+    if (offset + header > data.length) return true;
+    const length = new DataView(
+      data.buffer,
+      data.byteOffset + offset + (png ? 0 : 4),
+      4,
+    ).getUint32(0, !png);
+    const kind = ascii(data, offset + (png ? 4 : 0), 4);
+    if (
+      kind === "acTL" ||
+      kind === "ANIM" ||
+      kind === "ANMF" ||
+      (kind === "VP8X" && ((data[offset + 8] ?? 0) & 2) !== 0)
+    )
+      return true;
+    offset += header + length + (png ? 0 : length & 1);
   }
-  return -1;
-}
-
-function canonicalGif(data: Uint8Array) {
-  if (data.length < 13 || !["GIF87a", "GIF89a"].includes(ascii(data, 0, 6)))
-    return false;
-  let offset = 13;
-  if ((data[10] & 0x80) !== 0) offset += 3 << ((data[10] & 7) + 1);
-  while (offset < data.length) {
-    if (data[offset] === 0x2c) {
-      if (offset + 10 > data.length) return false;
-      const packed = data[offset + 9] ?? 0;
-      offset += 10;
-      if ((packed & 0x80) !== 0) offset += 3 << ((packed & 7) + 1);
-      if (++offset > data.length) return false;
-      offset = gifBlocksEnd(data, offset);
-    } else if (data[offset] === 0x21) {
-      const label = data[offset + 1];
-      offset += 2;
-      if (
-        label === 0xf9 &&
-        data[offset] === 4 &&
-        offset + 6 <= data.length &&
-        data[offset + 5] === 0
-      ) {
-        offset += 6;
-      } else if (
-        label === 0xff &&
-        data[offset] === 11 &&
-        ["NETSCAPE2.0", "ANIMEXTS1.0"].includes(ascii(data, offset + 1, 11)) &&
-        data[offset + 12] === 3 &&
-        data[offset + 13] === 1 &&
-        data[offset + 16] === 0
-      ) {
-        offset += 17;
-      } else {
-        return false;
-      }
-    } else if (data[offset] === 0x3b) {
-      return offset + 1 === data.length;
-    } else {
-      return false;
-    }
-    if (offset < 0) return false;
-  }
-  return false;
-}
-
-export function imageUploadDisposition(
-  data: Uint8Array,
-  type: string,
-): ImageUploadDisposition {
-  if (type === "image/png") return pngUploadDisposition(data);
-  if (type === "image/webp") return webpUploadDisposition(data);
-  if (type === "image/gif") return canonicalGif(data) ? "preserve" : "reject";
-  return "sanitize";
+  return offset !== data.length;
 }
 
 function blossomAuth(verb: "get" | "upload", hash?: string) {
@@ -744,28 +586,16 @@ function blossomAuth(verb: "get" | "upload", hash?: string) {
     .replace(/=+$/, "")}`;
 }
 
-async function putMedia(data: Uint8Array, type: string) {
-  const hash = Array.from(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", buffer(data))),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
-  return fetch(`${relayHttpUrl()}/upload`, {
-    method: "PUT",
-    headers: {
-      Authorization: blossomAuth("upload", hash),
-      "Content-Type": type,
-      "X-SHA-256": hash,
-    },
-    body: buffer(data),
-  });
-}
-
-export async function prepareImageForUpload(data: Uint8Array, type: string) {
-  const disposition = imageUploadDisposition(data, type);
-  if (disposition === "preserve") return { data, type };
-  if (disposition === "reject")
+export async function prepareImageForUpload(
+  data: Uint8Array,
+  type: string,
+  filename = "",
+) {
+  // ponytail: Canvas flattens animations and snapshot payloads; reject them
+  // until web support justifies a dedicated lossless encoder.
+  if (imageNeedsOriginal(data, type, filename))
     throw new Error(
-      "This image contains metadata Buzz Web cannot remove without changing it.",
+      "Buzz Web cannot safely clean this image without changing it.",
     );
   const bitmap = await createImageBitmap(new Blob([buffer(data)], { type }));
   try {
@@ -781,15 +611,11 @@ export async function prepareImageForUpload(data: Uint8Array, type: string) {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Unable to clean image.");
     context.drawImage(bitmap, 0, 0);
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob(
-        (output) =>
-          output
-            ? resolve(output)
-            : reject(new Error("Unable to clean image.")),
-        type,
-      ),
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, type),
     );
+    if (!blob) throw new Error("Unable to clean image.");
+    if (blob.size > 50 * 1024 * 1024) throw new Error("Image is too large.");
     return {
       data: new Uint8Array(await blob.arrayBuffer()),
       type: blob.type || type,
@@ -804,7 +630,7 @@ async function uploadBytes(data: Uint8Array, filename?: string) {
   let type = mimeType(data, filename);
   const originalType = type;
   if (type.startsWith("image/")) {
-    const prepared = await prepareImageForUpload(data, type);
+    const prepared = await prepareImageForUpload(data, type, filename);
     data = prepared.data;
     type = prepared.type;
     if (filename && type !== originalType) {
@@ -812,7 +638,19 @@ async function uploadBytes(data: Uint8Array, filename?: string) {
       filename = `${filename.replace(/\.[^./\\]+$/, "")}.${extension}`;
     }
   }
-  const response = await putMedia(data, type);
+  const hash = Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", buffer(data))),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const response = await fetch(`${relayHttpUrl()}/upload`, {
+    method: "PUT",
+    headers: {
+      Authorization: blossomAuth("upload", hash),
+      "Content-Type": type,
+      "X-SHA-256": hash,
+    },
+    body: buffer(data),
+  });
   const error = response.ok ? "" : await response.text();
   if (!response.ok) throw new Error(error || "Upload failed.");
   return {
