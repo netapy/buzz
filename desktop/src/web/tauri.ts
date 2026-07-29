@@ -529,23 +529,58 @@ function blossomAuth(verb: "get" | "upload", hash?: string) {
     .replace(/=+$/, "")}`;
 }
 
-async function uploadBytes(data: Uint8Array, filename?: string) {
-  if (data.length === 0) throw new Error("Empty upload.");
+async function putMedia(data: Uint8Array, type: string) {
   const hash = Array.from(
     new Uint8Array(await crypto.subtle.digest("SHA-256", buffer(data))),
     (byte) => byte.toString(16).padStart(2, "0"),
   ).join("");
-  const response = await fetch(`${relayHttpUrl()}/upload`, {
+  return fetch(`${relayHttpUrl()}/upload`, {
     method: "PUT",
     headers: {
       Authorization: blossomAuth("upload", hash),
-      "Content-Type": mimeType(data, filename),
+      "Content-Type": type,
       "X-SHA-256": hash,
     },
     body: buffer(data),
   });
-  if (!response.ok)
-    throw new Error((await response.text()) || "Upload failed.");
+}
+
+async function imageAsPng(data: Uint8Array, type: string) {
+  const bitmap = await createImageBitmap(new Blob([buffer(data)], { type }));
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to clean image.");
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (output) =>
+        output ? resolve(output) : reject(new Error("Unable to clean image.")),
+      "image/png",
+    ),
+  );
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function uploadBytes(data: Uint8Array, filename?: string) {
+  if (data.length === 0) throw new Error("Empty upload.");
+  let type = mimeType(data, filename);
+  let response = await putMedia(data, type);
+  let error = response.ok ? "" : await response.text();
+  if (
+    !response.ok &&
+    type.startsWith("image/") &&
+    error.includes("metadata or a non-canonical metadata channel")
+  ) {
+    data = await imageAsPng(data, type);
+    type = "image/png";
+    response = await putMedia(data, type);
+    error = response.ok ? "" : await response.text();
+    if (filename) filename = `${filename.replace(/\.[^./\\]+$/, "")}.png`;
+  }
+  if (!response.ok) throw new Error(error || "Upload failed.");
   return {
     ...(await response.json()),
     ...(filename ? { filename: filename.split(/[\\/]/).pop() } : {}),
