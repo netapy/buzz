@@ -211,9 +211,93 @@ test("fromRawAcpRuntimeCatalogEntry env round-trips through edit payload shape",
   );
 });
 
+// ── Browser upload image sanitization ────────────────────────────────────────
+
+const originalLocation = globalThis.location;
+globalThis.location = { host: "buzz.test", protocol: "https:" };
+const { imageUploadDisposition, prepareImageForUpload } = await import(
+  "../../web/tauri.ts"
+);
+
+test("browser upload preserves only metadata-free container images", () => {
+  for (const [type, expected, encoded] of [
+    ["image/png", "preserve", "iVBORw0KGgoAAAAAYWNUTAAAAAAAAAAASUVORAAAAAA="],
+    [
+      "image/png",
+      "reject",
+      "iVBORw0KGgoAAAAAYWNUTAAAAAAAAAALdEVYdENvbW1lbnQAR1BTAAAAAAAAAABJRU5EAAAAAA==",
+    ],
+    [
+      "image/png",
+      "preserve",
+      "iVBORw0KGgoAAAAWdEVYdGJ1enpfYWdlbnRfc25hcHNob3QAe30AAAAAAAAAAElFTkQAAAAA",
+    ],
+    [
+      "image/webp",
+      "preserve",
+      "UklGRjQAAABXRUJQQU5JTQYAAAAAAAAAAABBTk1GGgAAAAAAAAAAAAAAAAAAAAAAAABWUDggAQAAAAAA",
+    ],
+    [
+      "image/webp",
+      "reject",
+      "UklGRjwAAABXRUJQQU5JTQYAAAAAAAAAAABBTk1GGgAAAAAAAAAAAAAAAAAAAAAAAABWUDggAQAAAAAARVhJRgAAAAA=",
+    ],
+    [
+      "image/gif",
+      "preserve",
+      "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBADs=",
+    ],
+    [
+      "image/gif",
+      "reject",
+      "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBACH+AUEAOw==",
+    ],
+  ]) {
+    assert.equal(
+      imageUploadDisposition(
+        Uint8Array.from(Buffer.from(encoded, "base64")),
+        type,
+      ),
+      expected,
+    );
+  }
+});
+
+test("browser upload refuses oversized images before allocating a canvas", async () => {
+  const originalBitmap = globalThis.createImageBitmap;
+  const originalDocument = globalThis.document;
+  let closed = false;
+  let canvasCreated = false;
+  globalThis.createImageBitmap = async () => ({
+    close: () => {
+      closed = true;
+    },
+    height: 5_000,
+    width: 5_001,
+  });
+  globalThis.document = {
+    createElement: () => {
+      canvasCreated = true;
+      return {};
+    },
+  };
+  try {
+    await assert.rejects(
+      prepareImageForUpload(Uint8Array.from([0xff, 0xd8]), "image/jpeg"),
+      /dimensions are too large/,
+    );
+    assert.equal(canvasCreated, false);
+    assert.equal(closed, true);
+  } finally {
+    globalThis.createImageBitmap = originalBitmap;
+    globalThis.document = originalDocument;
+  }
+});
+
 // ── Teardown ──────────────────────────────────────────────────────────────────
 
 test("teardown — restore Date.now", () => {
   Date.now = origDateNow;
+  globalThis.location = originalLocation;
   assert.ok(true);
 });
