@@ -116,7 +116,7 @@ export function ChannelRouteScreen({
       activeChannel.channelType === "dm"
         ? activeChannel.name
         : `#${activeChannel.name}`;
-    document.title = `${channelTitle} | ${baseTitle}`;
+    document.title = `${channelTitle} - Buzz`;
     return () => {
       document.title = baseTitle;
     };
