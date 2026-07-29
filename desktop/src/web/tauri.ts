@@ -9,6 +9,7 @@ import {
   nip44,
   nip98,
 } from "nostr-tools";
+import { verifyEvent } from "nostr-tools/pure";
 import { parse as parseYaml } from "yaml";
 
 import { truncatePubkey } from "@/shared/lib/pubkey";
@@ -289,6 +290,31 @@ function nipOaOwner(event: RelayEvent): string | null {
     }
   }
   return null;
+}
+
+export function archivedPubkeysFromSnapshot(
+  snapshot: RelayEvent | undefined,
+  relaySelf: string,
+): string[] {
+  try {
+    const author = relaySelf.toLowerCase();
+    if (
+      !/^[0-9a-f]{64}$/.test(author) ||
+      !snapshot ||
+      snapshot.pubkey.toLowerCase() !== author ||
+      !verifyEvent(snapshot)
+    )
+      return [];
+
+    return snapshot.tags.flatMap(([name, pubkey]) => {
+      const normalized = pubkey?.toLowerCase();
+      return name === "p" && normalized && /^[0-9a-f]{64}$/.test(normalized)
+        ? [normalized]
+        : [];
+    });
+  } catch {
+    return [];
+  }
 }
 
 async function resolveThread(parentEventId: string) {
@@ -1186,6 +1212,25 @@ export async function invoke<T>(
           };
         }),
         next_cursor: events.length >= limit ? String(page + 1) : null,
+      } as T;
+    }
+    case "list_archived_identities": {
+      const response = await fetch(`${relayHttpUrl()}/info`, {
+        headers: { Accept: "application/nostr+json" },
+      });
+      if (!response.ok) return { archived: [] } as T;
+      const relaySelf = ((await response.json()) as { self?: unknown }).self;
+      if (typeof relaySelf !== "string" || !/^[0-9a-f]{64}$/i.test(relaySelf))
+        return { archived: [] } as T;
+      const [snapshot] = await relayQuery([
+        {
+          authors: [relaySelf.toLowerCase()],
+          kinds: [13535],
+          limit: 1,
+        },
+      ]);
+      return {
+        archived: archivedPubkeysFromSnapshot(snapshot, relaySelf),
       } as T;
     }
     case "update_profile": {

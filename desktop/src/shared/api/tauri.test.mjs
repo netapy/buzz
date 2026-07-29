@@ -215,9 +215,43 @@ test("fromRawAcpRuntimeCatalogEntry env round-trips through edit payload shape",
 
 const originalLocation = globalThis.location;
 globalThis.location = { host: "buzz.test", protocol: "https:" };
-const { imageUploadDisposition, prepareImageForUpload } = await import(
-  "../../web/tauri.ts"
-);
+const {
+  archivedPubkeysFromSnapshot,
+  imageUploadDisposition,
+  prepareImageForUpload,
+} = await import("../../web/tauri.ts");
+
+test("browser archive snapshot accepts only relay-signed pubkeys", async () => {
+  const { finalizeEvent, generateSecretKey, getPublicKey } = await import(
+    "nostr-tools"
+  );
+  const relayKey = generateSecretKey();
+  const archived = "ab".repeat(32);
+  const snapshot = finalizeEvent(
+    {
+      kind: 13535,
+      created_at: 1,
+      content: "",
+      tags: [
+        ["p", archived.toUpperCase()],
+        ["p", "invalid"],
+      ],
+    },
+    relayKey,
+  );
+
+  assert.deepEqual(
+    archivedPubkeysFromSnapshot(snapshot, getPublicKey(relayKey)),
+    [archived],
+  );
+  const tampered = structuredClone(snapshot);
+  tampered.content = "tampered";
+  assert.deepEqual(
+    archivedPubkeysFromSnapshot(tampered, getPublicKey(relayKey)),
+    [],
+  );
+  assert.deepEqual(archivedPubkeysFromSnapshot(snapshot, "cd".repeat(32)), []);
+});
 
 test("browser upload preserves only metadata-free container images", () => {
   for (const [type, expected, encoded] of [
