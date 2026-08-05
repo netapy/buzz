@@ -236,13 +236,16 @@ export function HomeView({
     inboxListWidthPx,
   } = useResizableInboxListWidth();
   const {
+    clearChannelUnreadSource,
     getChannelReadAt,
     getThreadReadAt,
     getMessageReadAt,
     feedItemState,
     markChannelRead,
+    markChannelUnread,
     markMessageRead,
     markThreadRead,
+    recordThreadInteraction,
     readStateVersion,
   } = useAppShell();
   const { doneSet, markDone, markUnread, undoDone, undoUnread, unreadSet } =
@@ -386,7 +389,9 @@ export function HomeView({
       readStateVersion,
       localDoneSet: doneSet,
       localUnreadSet: unreadSet,
+      clearChannelUnreadSource,
       markChannelRead,
+      markChannelUnread,
       markMessageRead,
       markThreadRead,
       markDoneLocal: markDone,
@@ -872,6 +877,13 @@ export function HomeView({
                         eventId: message.id,
                         remove,
                       });
+                      if (!remove) {
+                        recordThreadInteraction(
+                          selectedItem?.conversationId ??
+                            message.rootId ??
+                            message.id,
+                        );
+                      }
                       await threadContext.refreshReactions();
                       await channelMessagesQuery.refetch();
                       onRefresh();
