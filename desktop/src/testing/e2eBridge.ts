@@ -365,6 +365,13 @@ type E2eConfig = {
     linkPreviewMetadataDelayMs?: number;
     /** Simulates native cold-cache startup work before the async response. */
     linkPreviewMetadataStartBlockMs?: number;
+    /** Delays link-preview snapshot media uploads so specs can exercise the
+     *  composer's settle-gated disabled state before the snapshot tag is ready. */
+    linkPreviewUploadDelayMs?: number;
+    /** Substrings of `link-preview-*` upload filenames whose `upload_media_bytes`
+     *  call should reject, so specs can drive a per-media snapshot upload failure
+     *  (e.g. `["link-preview-image"]` fails only the thumbnail, favicon survives). */
+    linkPreviewUploadErrorFilenames?: string[];
     searchProfiles?: MockSearchProfileSeed[];
     updateAvailable?: boolean;
     updateChannelDelayMs?: number;
@@ -463,6 +470,8 @@ type E2eConfig = {
     // When true, `get_identity` returns `locked: true` until `import_identity` is
     // called. Drives the keyring-locked screen in tests.
     identityLocked?: boolean;
+    /** Delay (ms) applied to identity import so specs can observe pending navigation. */
+    identityImportDelayMs?: number;
     /**
      * Global agent config returned by `get_global_agent_config`. Defaults to
      * an empty config (no provider, model, or env vars) if not specified.
@@ -8928,6 +8937,16 @@ async function resolveMockUploadDescriptorForBytes(
   args: { data: number[] | Uint8Array; filename?: string | null },
   config: E2eConfig | undefined,
 ): Promise<RawBlobDescriptor> {
+  const uploadDelayMs = config?.mock?.linkPreviewUploadDelayMs ?? 0;
+  if (args.filename?.startsWith("link-preview-")) {
+    if (uploadDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, uploadDelayMs));
+    }
+    const errorFilenames = config?.mock?.linkPreviewUploadErrorFilenames;
+    if (errorFilenames?.some((needle) => args.filename?.includes(needle))) {
+      throw new Error(`mock upload failed for ${args.filename}`);
+    }
+  }
   const configured = config?.mock?.uploadDescriptors;
   if (configured !== undefined) {
     const descriptors = await resolveMockUploadDescriptors(config);
@@ -11183,6 +11202,12 @@ export function maybeInstallE2eTauriMocks() {
         };
       }
       case "import_identity": {
+        const importDelayMs = activeConfig?.mock?.identityImportDelayMs ?? 0;
+        if (importDelayMs > 0) {
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, importDelayMs),
+          );
+        }
         const request = payload as { nsec?: string; password?: string } | null;
         const input = request?.nsec ?? "";
         if (input.trim().startsWith("ncryptsec1")) {
