@@ -49,21 +49,18 @@ import { InboxListPane } from "@/features/home/ui/InboxListPane";
 import { HomePersonalInboxDetail } from "@/features/home/ui/HomePersonalInboxDetail";
 import {
   useChannelMessagesQuery,
-  useChannelSubscription,
   useToggleReactionMutation,
 } from "@/features/messages/hooks";
 import { collectMessageMentionPubkeys } from "@/features/messages/lib/formatTimelineMessages";
 import { formatTime } from "@/features/messages/lib/dateFormatters";
 import { DeleteMessageConfirmDialog } from "@/features/messages/ui/DeleteMessageConfirmDialog";
-import { splitOutgoingTags } from "@/features/messages/lib/imetaMediaMarkdown";
-import { messageMentionPubkeys } from "@/features/messages/lib/messageMentionPubkeys";
 import { getThreadReference } from "@/features/messages/lib/threading";
 import { useUsersBatchQuery } from "@/features/profile/hooks";
 import { useRelaySelfQuery } from "@/features/moderation/hooks";
 import { resolveUserLabel } from "@/features/profile/lib/identity";
 import { useRemindLater } from "@/features/reminders/ui/RemindMeLaterProvider";
-import { deleteMessage, sendChannelMessage } from "@/shared/api/tauri";
-import type { HomeFeedResponse } from "@/shared/api/types";
+import { deleteMessage } from "@/shared/api/tauri";
+import type { Channel, HomeFeedResponse } from "@/shared/api/types";
 import { KIND_REACTION } from "@/shared/constants/kinds";
 import { topChromeInset } from "@/shared/layout/chromeLayout";
 import { cn } from "@/shared/lib/cn";
@@ -74,6 +71,8 @@ import { AUXILIARY_PANEL_SINGLE_COLUMN_BREAKPOINT_PX } from "@/shared/layout/Aux
 import { useHistorySearchState } from "@/shared/hooks/useHistorySearchState";
 import { ProfilePanelProvider } from "@/shared/context/ProfilePanelContext";
 import { Button } from "@/shared/ui/button";
+import { HomeMembersSidebarOverlay } from "./HomeMembersSidebarOverlay";
+import { sendHomeInboxReply } from "./HomeReplySend";
 
 const INBOX_SEARCH_KEYS = [
   "item",
@@ -167,6 +166,9 @@ export function HomeView({
   } | null>(null);
   const selectedEventId = urlSelectedItemId ?? autoSelectedEventId;
   const [managedChannelId, setManagedChannelId] = React.useState<string | null>(
+    null,
+  );
+  const [membersChannel, setMembersChannel] = React.useState<Channel | null>(
     null,
   );
   const { goChannel } = useAppNavigation();
@@ -298,7 +300,6 @@ export function HomeView({
     homeInboxWidthPx < AUXILIARY_PANEL_SINGLE_COLUMN_BREAKPOINT_PX;
 
   const channelMessagesQuery = useChannelMessagesQuery(selectedChannel);
-  useChannelSubscription(selectedChannel);
   const toggleReactionMutation = useToggleReactionMutation();
   const channelMessages = channelMessagesQuery.data;
   const threadContext = useInboxThreadContext(
@@ -821,6 +822,7 @@ export function HomeView({
                 if (!selectedItem || !canDelete) return;
                 void deleteInboxMessage(selectedItem.id);
               }}
+              onDeleteMessage={deleteInboxMessage}
               onManageChannel={(channelId) => {
                 handleCloseProfilePanel();
                 setManagedChannelId(channelId);
@@ -842,29 +844,16 @@ export function HomeView({
                 const itemToReply = selectedItem;
                 setIsSendingReply(true);
                 try {
-                  const {
-                    mediaTags: imetaTags,
-                    emojiTags,
-                    mentionTags,
-                  } = splitOutgoingTags(mediaTags);
-                  const recipientPubkeys =
-                    selectedChannel && currentPubkey
-                      ? messageMentionPubkeys(
-                          selectedChannel,
-                          currentPubkey,
-                          mentionPubkeys,
-                        )
-                      : mentionPubkeys;
-                  const result = await sendChannelMessage(
-                    channelId,
-                    content,
-                    parentEventId,
-                    imetaTags,
-                    recipientPubkeys,
-                    undefined,
-                    emojiTags,
-                    mentionTags,
-                  );
+                  const { result, imetaTags, emojiTags, mentionTags } =
+                    await sendHomeInboxReply({
+                      channel: selectedChannel,
+                      channelId,
+                      content,
+                      currentPubkey,
+                      mediaTags,
+                      mentionPubkeys,
+                      parentEventId,
+                    });
                   const authorPubkey = currentPubkey ?? itemToReply.item.pubkey;
                   const reply: InboxReply = {
                     authorLabel: currentPubkey
@@ -983,6 +972,7 @@ export function HomeView({
                 channel={managedChannel}
                 currentPubkey={currentPubkey}
                 layout="split"
+                onOpenMembers={() => setMembersChannel(managedChannel)}
                 onOpenChange={(nextOpen) => {
                   if (!nextOpen) {
                     setManagedChannelId(null);
@@ -994,6 +984,11 @@ export function HomeView({
           ) : null}
         </div>
       </div>
+      <HomeMembersSidebarOverlay
+        channel={membersChannel}
+        currentPubkey={currentPubkey}
+        onClose={() => setMembersChannel(null)}
+      />
     </ProfilePanelProvider>
   );
 }
