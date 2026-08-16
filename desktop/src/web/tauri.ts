@@ -117,13 +117,32 @@ async function saveIdentity(key: Uint8Array): Promise<void> {
   );
 }
 
+function attachMediaAuthBridge(): void {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type !== "buzz-media-auth-request") return;
+    let authorization: string | null = null;
+    try {
+      if (secretKey) authorization = blossomAuth("get");
+    } catch {
+      authorization = null;
+    }
+    event.source?.postMessage({
+      type: "buzz-media-auth",
+      id: event.data.id,
+      authorization,
+    });
+  });
+}
+
 export async function initializeBrowserIdentity(): Promise<void> {
   const manifest = document.createElement("link");
   manifest.rel = "manifest";
   manifest.href = "/manifest.webmanifest";
   document.head.append(manifest);
+  attachMediaAuthBridge();
   if ("serviceWorker" in navigator)
-    void navigator.serviceWorker.register("/sw.js");
+    void navigator.serviceWorker.register("/sw.js?v=20260816-media-auth");
   void navigator.storage?.persist?.();
   secretKey = await loadIdentity();
   if (!secretKey && !lockedPubkey) {
@@ -1861,6 +1880,14 @@ export async function invoke<T>(
       return undefined as T;
     case "relay_reconnect_hook_configured":
       return false as T;
+    case "get_media_proxy_port":
+      return 0 as T;
+    case "take_pending_entity_deep_link":
+    case "take_pending_navigation_deep_link":
+      return null as T;
+    case "merge_save_subscription_kinds":
+    case "remove_save_subscription_kind":
+      return undefined as T;
     default:
       throw new Error(`Unsupported browser command: ${command}`);
   }
