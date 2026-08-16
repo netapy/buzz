@@ -1110,8 +1110,18 @@ export async function invoke<T>(
       await submitEvent(event);
       return rawProfile(event, event.pubkey) as T;
     }
-    case "get_channels":
-      return (await getRawChannels()) as T;
+    case "get_channels": {
+      const channels = await getRawChannels();
+      return {
+        hash: bytesToBase64(sha256(encoder.encode(JSON.stringify(channels)))),
+        channels,
+        last_messages: Object.fromEntries(
+          channels
+            .filter((channel) => channel.last_message_at !== null)
+            .map((channel) => [channel.id, channel.last_message_at]),
+        ),
+      } as T;
+    }
     case "ensure_starter_channels":
       return (await ensureRawStarterChannels()) as T;
     case "create_channel": {
