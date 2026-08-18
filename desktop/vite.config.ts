@@ -5,6 +5,15 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
+const sharedAliases = {
+  "@": "/src",
+  "@features-manifest": path.resolve(__dirname, "../preview-features.json"),
+  "@model-capabilities-manifest": path.resolve(
+    __dirname,
+    "../scripts/model-capabilities.json",
+  ),
+};
+
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }) => ({
   plugins: [
@@ -34,14 +43,15 @@ export default defineConfig(async ({ mode }) => ({
               find: "@features-manifest",
               replacement: path.resolve(__dirname, "../preview-features.json"),
             },
+            {
+              find: "@model-capabilities-manifest",
+              replacement: path.resolve(
+                __dirname,
+                "../scripts/model-capabilities.json",
+              ),
+            },
           ]
-        : {
-            "@": "/src",
-            "@features-manifest": path.resolve(
-              __dirname,
-              "../preview-features.json",
-            ),
-          },
+        : sharedAliases,
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

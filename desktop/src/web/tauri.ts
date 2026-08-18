@@ -501,6 +501,7 @@ function rawWorkflow(event: RelayEvent) {
   const id = tag(event, "d") ?? "";
   return {
     id,
+    revision: event.id,
     name:
       typeof definition.name === "string" && definition.name.trim()
         ? definition.name
@@ -1739,24 +1740,37 @@ export async function invoke<T>(
         },
       } as T;
     }
-    case "list_relay_agents": {
+    case "list_relay_agents":
+    case "revalidate_relay_agents": {
       const events = await relayQuery([{ kinds: [10100], limit: 1000 }]);
-      return events.map((event) => {
-        const content = JSON.parse(event.content || "{}");
-        return {
-          ...content,
-          pubkey: event.pubkey,
-          name:
-            content.name ??
-            content.display_name ??
-            nip19.npubEncode(event.pubkey),
-          agent_type: content.agent_type ?? "agent",
-          channels: content.channels ?? [],
-          channel_ids: content.channel_ids ?? [],
-          capabilities: content.capabilities ?? [],
-          status: content.status ?? "offline",
-        };
-      }) as T;
+      const wanted = new Set(
+        command === "revalidate_relay_agents"
+          ? ((args.pubkeys as string[] | undefined) ?? []).map((pubkey) =>
+              pubkey.toLowerCase(),
+            )
+          : [],
+      );
+      return events
+        .filter(
+          (event) => wanted.size === 0 || wanted.has(event.pubkey.toLowerCase()),
+        )
+        .map((event) => {
+          const content = JSON.parse(event.content || "{}");
+          return {
+            ...content,
+            pubkey: event.pubkey,
+            owner_pubkey: content.owner_pubkey ?? content.ownerPubkey ?? null,
+            name:
+              content.name ??
+              content.display_name ??
+              nip19.npubEncode(event.pubkey),
+            agent_type: content.agent_type ?? "agent",
+            channels: content.channels ?? [],
+            channel_ids: content.channel_ids ?? [],
+            capabilities: content.capabilities ?? [],
+            status: content.status ?? "offline",
+          };
+        }) as T;
     }
     case "grant_approval":
     case "deny_approval": {
@@ -1821,6 +1835,11 @@ export async function invoke<T>(
       ]);
       const channelId = previous && tag(previous, "h");
       if (!channelId) throw new Error("workflow not found");
+      if (
+        args.expectedRevision &&
+        previous.id !== String(args.expectedRevision)
+      )
+        throw new Error("workflow revision conflict");
       const event = await publish(30620, String(args.yamlDefinition), [
         ["d", id],
         ["h", channelId],
