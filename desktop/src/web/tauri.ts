@@ -1752,7 +1752,8 @@ export async function invoke<T>(
       );
       return events
         .filter(
-          (event) => wanted.size === 0 || wanted.has(event.pubkey.toLowerCase()),
+          (event) =>
+            wanted.size === 0 || wanted.has(event.pubkey.toLowerCase()),
         )
         .map((event) => {
           const content = JSON.parse(event.content || "{}");
