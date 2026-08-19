@@ -1958,6 +1958,10 @@ export async function openUrl(url: string | URL): Promise<void> {
   window.open(String(url), "_blank", "noopener,noreferrer");
 }
 
+export async function openPath(_path: string): Promise<void> {
+  throw new Error("Opening local paths is not available in the browser.");
+}
+
 export async function homeDir(): Promise<string> {
   return "";
 }
