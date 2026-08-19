@@ -1917,6 +1917,7 @@ export async function invoke<T>(
       return null as T;
     case "merge_save_subscription_kinds":
     case "remove_save_subscription_kind":
+    case "persist_agent_effort_level":
       return undefined as T;
     default:
       throw new Error(`Unsupported browser command: ${command}`);
