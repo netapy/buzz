@@ -652,6 +652,7 @@ export function useAppOnboardingState(isSharedIdentity: boolean) {
     initialProfile: {
       profile: profileQuery.data,
     },
+    initialProfileDecisionSettled: onboardingGate.stage !== "blocking",
   };
 
   // Recovery completed this boot: force a relaunch screen regardless of any
