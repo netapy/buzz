@@ -43,7 +43,11 @@ import { SetupStep } from "./SetupStep";
 import type { HarnessConnectionMethod } from "./harnessConnectionOptions";
 import type { DefaultConfigDraft } from "./types";
 import { isWebBuild } from "@/web/capabilities";
-import { DesktopPairingSignIn } from "@/web/DesktopPairingSignIn";
+import {
+  DesktopPairingSignIn,
+  PhoneQrHint,
+  QrSignInButton,
+} from "@/web/DesktopPairingSignIn";
 
 export type MachineOnboardingPage =
   | "identity"
@@ -383,6 +387,19 @@ export function MachineOnboardingFlow({
                       ? "Continue setup"
                       : "Create a new identity key"}
                 </Button>
+                {isWebBuild ? (
+                  <QrSignInButton
+                    className={`${ONBOARDING_SECONDARY_CTA_CLASS} px-5`}
+                    disabled={isPending}
+                    onClick={() => {
+                      setKeyImportStage("key-entry");
+                      setPhoneRecoveryStep("loading");
+                      setKeyImportDialog("phone");
+                      setTransitionDirection("forward");
+                      setPage("key-import");
+                    }}
+                  />
+                ) : null}
                 <Button
                   className={`${ONBOARDING_SECONDARY_CTA_CLASS} px-5`}
                   disabled={isPending}
@@ -490,6 +507,15 @@ export function MachineOnboardingFlow({
                   onStepChange={setPhoneRecoveryStep}
                 />
               </div>
+              {isWebBuild ? (
+                <>
+                  <PhoneQrHint />
+                  <DesktopPairingSignIn
+                    disabled={isPending}
+                    onSignedIn={() => void loadRecoveredIdentity()}
+                  />
+                </>
+              ) : null}
             </div>
           ) : (
             <>

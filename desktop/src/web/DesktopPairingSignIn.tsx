@@ -1,6 +1,7 @@
 import {
   Check,
   LoaderCircle,
+  QrCode,
   ScanLine,
   ShieldCheck,
   TriangleAlert,
@@ -272,5 +273,26 @@ export function DesktopPairingSignIn({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+export function QrSignInButton(props: {
+  className: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button {...props} data-testid="qr-sign-in" type="button" variant="ghost">
+      <QrCode className="mr-2 h-4 w-4" />
+      Sign in with a QR code
+    </Button>
+  );
+}
+
+export function PhoneQrHint() {
+  return (
+    <p className="mt-3 text-center text-sm text-foreground/70">
+      On your phone, open Buzz, then Settings → Send identity to desktop.
+    </p>
   );
 }
