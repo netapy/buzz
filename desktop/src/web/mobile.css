@@ -12,6 +12,14 @@
   border-color: hsl(var(--foreground) / 0.28);
 }
 
+/* A calm boot splash: the bee on the theme background, no gradient wash. */
+.buzz-setup-loading-shell {
+  background: hsl(var(--background));
+}
+.buzz-setup-loading-shell [data-testid="setup-grainient-background"] {
+  display: none;
+}
+
 @media (max-width: 767px) {
   html,
   body {

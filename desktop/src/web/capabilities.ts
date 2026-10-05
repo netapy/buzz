@@ -31,6 +31,10 @@ export function isSettingsSectionHiddenInBrowser(section: string): boolean {
   return isWebBuild && HIDDEN_SETTINGS_SECTIONS.has(section);
 }
 
+// The organisation's look for anyone who hasn't picked a theme: Slack, light
+// or dark with the system. Settings → Appearance still overrides it.
+export const defaultThemeName = isWebBuild ? "slack-ochin" : "buzz";
+
 // The PWA serves one organisation from its own domain: name the community
 // after it (chat.ordalie.com → "Ordalie") rather than the first host label.
 export function browserCommunityName(hostname: string): string | null {

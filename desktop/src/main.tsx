@@ -14,6 +14,7 @@ import { CommunitiesProvider } from "@/features/communities/useCommunities";
 import { huddleWindowChannelId } from "@/features/huddle/lib/huddleWindow";
 import { CommunityOnboardingProvider } from "@/features/onboarding/communityOnboarding";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
+import { defaultThemeName } from "@/web/capabilities";
 import { AvatarClipPaths } from "@/shared/ui/AvatarClipPaths";
 import { EmojiBurstProvider } from "@/shared/ui/EmojiBurstProvider";
 import { PoofBurstProvider } from "@/shared/ui/PoofBurstProvider";
@@ -90,7 +91,7 @@ function renderApp() {
           <CommunityOnboardingProvider
             enabled={huddleWindowChannelId() === null}
           >
-            <ThemeProvider defaultTheme="buzz">
+            <ThemeProvider defaultTheme={defaultThemeName}>
               <TooltipProvider>
                 <EmojiBurstProvider>
                   <PoofBurstProvider>
