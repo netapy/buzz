@@ -1,10 +1,12 @@
-import type * as React from "react";
+import { useLocation } from "@tanstack/react-router";
+import * as React from "react";
 import * as BuzzTheme from "@/app/BuzzThemeSurfaces";
 import { HuddleRoomHeader, HuddleStartingView } from "@/features/huddle";
 import { MainInsetProvider } from "@/shared/layout/MainInsetContext";
 import { chromeCssVarDefaults } from "@/shared/layout/chromeLayout";
 import { cn } from "@/shared/lib/cn";
 import { SidebarInset, useSidebar } from "@/shared/ui/sidebar";
+import { isWebBuild } from "@/web/capabilities";
 
 type AppShellChannelSurfaceProps = {
   children: React.ReactNode;
@@ -23,9 +25,21 @@ export function AppShellChannelSurface({
   mainInsetRef,
   terminal,
 }: AppShellChannelSurfaceProps) {
-  const { isMobile, openMobile, state: sidebarState } = useSidebar();
+  const {
+    isMobile,
+    openMobile,
+    setOpenMobile,
+    state: sidebarState,
+  } = useSidebar();
+  const { pathname } = useLocation();
+  // The mobile drawer is a navigator: picking a destination dismisses it.
+  React.useEffect(() => {
+    if (pathname) setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
+  // Phones get an edge-to-edge screen instead of an inset card.
+  const unframed = isHuddleRoom || (isWebBuild && isMobile);
   const hasCollapsedSidebarGutter =
-    !isHuddleRoom &&
+    !unframed &&
     !hasCommunityRail &&
     (isMobile ? !openMobile : sidebarState === "collapsed");
 
@@ -51,7 +65,7 @@ export function AppShellChannelSurface({
           />
         ) : null}
         {isHuddleRoom && !isHuddleRoomStarting ? <HuddleRoomHeader /> : null}
-        <BuzzTheme.ContentSurface terminal={terminal} unframed={isHuddleRoom}>
+        <BuzzTheme.ContentSurface terminal={terminal} unframed={unframed}>
           {isHuddleRoomStarting ? <HuddleStartingView /> : children}
         </BuzzTheme.ContentSurface>
       </SidebarInset>

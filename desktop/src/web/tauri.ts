@@ -34,6 +34,8 @@ import { backupCommands } from "./backup";
 import { channelInfo, chatCommands } from "./chat";
 import { mediaCommands } from "./media";
 import { NATIVE_ONLY_COMMANDS } from "./nativeOnly";
+import "./mobile.css";
+import { initializeMobileShell } from "./mobile";
 import { attachNotificationClickBridge } from "./notifications";
 import { pairingCommands } from "./pairing";
 
@@ -78,6 +80,7 @@ function reloadOnStaleChunks(): void {
 }
 
 export async function initializeBrowserIdentity(): Promise<void> {
+  initializeMobileShell();
   reloadOnStaleChunks();
   attachMediaAuthBridge();
   attachNotificationClickBridge();

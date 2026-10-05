@@ -52,6 +52,7 @@ import { cn } from "@/shared/lib/cn";
 import { observeElementBlockSize } from "@/shared/layout/observeElementBlockSize";
 import { useMeasuredCssVariable } from "@/shared/layout/useMeasuredCssVariable";
 import { Badge } from "@/shared/ui/badge";
+import { isWebBuild } from "@/web/capabilities";
 
 export { AgentInstructionsFocusedView } from "@/features/profile/ui/UserProfilePanelAgentDetails";
 
@@ -458,7 +459,7 @@ export function ProfileSummaryView({
           isFollowing={isFollowing}
           huddlePending={isBot ? undefined : isHuddlePending}
           messagePending={isMessagePending}
-          onHuddle={isBot ? undefined : handleHuddle}
+          onHuddle={isBot || isWebBuild ? undefined : handleHuddle}
           onMessage={handleMessage}
           onWave={handleWave}
           pubkey={pubkey}

@@ -1,6 +1,12 @@
 import * as React from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ChevronLeft,
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
 
 import { useMyRelayMembershipLookupQuery } from "@/features/community-members/hooks";
 import {
@@ -129,6 +135,15 @@ export function SettingsView({
   section,
 }: SettingsViewProps) {
   const { isMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
+  // Phones get a list screen that pushes one section at a time.
+  const [mobileListOpen, setMobileListOpen] = React.useState(true);
+  const selectSection = React.useCallback(
+    (value: SettingsSection) => {
+      onSectionChange(value);
+      setMobileListOpen(false);
+    },
+    [onSectionChange],
+  );
   const myMembershipQuery = useMyRelayMembershipLookupQuery();
   const featureState = useFeatureSnapshot();
   const visibleSections = React.useMemo(() => {
@@ -220,8 +235,11 @@ export function SettingsView({
   return (
     <>
       <Sidebar
-        className="!border-r-0"
-        collapsible="offcanvas"
+        className={cn(
+          "!border-r-0",
+          isMobile && (mobileListOpen ? "w-full" : "hidden"),
+        )}
+        collapsible={isMobile ? "none" : "offcanvas"}
         data-testid="settings-sidebar"
         variant="sidebar"
       >
@@ -301,7 +319,7 @@ export function SettingsView({
                     <SettingsSectionButton
                       active={entry.value === section}
                       key={entry.value}
-                      onSelect={onSectionChange}
+                      onSelect={selectSection}
                       section={entry}
                     />
                   ))}
@@ -328,19 +346,32 @@ export function SettingsView({
         className={cn(
           "isolate relative min-h-0 min-w-0 overflow-hidden bg-sidebar motion-safe:transition-opacity motion-safe:duration-200",
           isLoaded ? "opacity-100" : "opacity-0",
+          isMobile && mobileListOpen && "hidden",
         )}
         data-buzz-shadow-viewport
         data-testid="settings-view"
       >
-        <div
-          aria-hidden="true"
-          className={cn(
-            "relative z-10 shrink-0 cursor-default select-none",
-            topChromeBackdrop.height,
-          )}
-          data-tauri-drag-region
-          data-testid="settings-top-chrome"
-        />
+        {isMobile ? (
+          <button
+            className="relative z-10 flex h-14 shrink-0 items-center gap-1 px-2 text-base font-medium"
+            data-testid="settings-mobile-back"
+            onClick={() => setMobileListOpen(true)}
+            type="button"
+          >
+            <ChevronLeft className="h-6 w-6" />
+            Settings
+          </button>
+        ) : (
+          <div
+            aria-hidden="true"
+            className={cn(
+              "relative z-10 shrink-0 cursor-default select-none",
+              topChromeBackdrop.height,
+            )}
+            data-tauri-drag-region
+            data-testid="settings-top-chrome"
+          />
+        )}
         <div
           className="relative z-10 mb-2 ml-px mr-2 mt-px flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-background shadow-content-edge"
           data-buzz-content-surface

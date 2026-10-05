@@ -1,0 +1,321 @@
+/* Phone layout for the browser build (loaded by web/tauri.ts only). The
+   desktop shell stays untouched; below the app's 768px mobile breakpoint the
+   app becomes a full-bleed, single-pane screen with native touch metrics. */
+
+@media (max-width: 767px) {
+  html,
+  body {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Follow the visual viewport (see mobile.ts) so the on-screen keyboard
+     shortens the app instead of pushing it off screen. */
+  .buzz-huddle-shell {
+    position: fixed;
+    inset-inline: 0;
+    top: var(--buzz-viewport-top, 0px);
+    height: var(--buzz-viewport-height, 100dvh);
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Sentence case everywhere: hierarchy comes from size and weight. */
+  .uppercase {
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  /* Touch users never see focus rings from taps; keyboards still do. */
+  :focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
+  }
+
+  /* --- App bar: the drawer button joins the screen header ---------------- */
+  [data-testid="app-top-chrome"] {
+    position: absolute;
+    top: env(safe-area-inset-top);
+    left: 0;
+    z-index: 60;
+    height: 3.5rem;
+    padding: 0 0 0 0.375rem;
+    background: transparent;
+  }
+  [data-testid="global-back"],
+  [data-testid="global-forward"],
+  #app-top-chrome-content {
+    display: none;
+  }
+  [data-testid="app-top-chrome"] [data-sidebar="trigger"] {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 9999px;
+  }
+  /* A plain menu glyph reads better than the desktop panel icon. */
+  [data-testid="app-top-chrome"] [data-sidebar="trigger"] svg {
+    display: none;
+  }
+  [data-testid="app-top-chrome"] [data-sidebar="trigger"]::before {
+    width: 1.375rem;
+    height: 1.375rem;
+    background: currentColor;
+    content: "";
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 7h16M4 12h16M4 17h16'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+  /* Threads are a pushed screen with their own close button. */
+  :root:has([data-testid="message-thread-panel"])
+    [data-testid="app-top-chrome"] {
+    display: none;
+  }
+  [data-testid="chat-header"],
+  [data-testid="channel-shared-header-backdrop"] {
+    min-height: 3.5rem;
+  }
+  [data-testid="chat-header"] {
+    padding-left: 2.75rem;
+  }
+  [data-testid="inbox-filter-trigger"] {
+    margin-left: 2.5rem;
+  }
+  [data-testid="channel-shared-header-backdrop"],
+  [data-testid="home-inbox-shared-header-backdrop"] {
+    background: hsl(var(--background));
+    border-bottom: 1px solid hsl(var(--border) / 0.6);
+  }
+
+  /* --- Onboarding: landing ------------------------------------------------- */
+  /* Wordmark and tagline centred in the top area, equal-width actions in the
+     thumb zone, the identity-key help pinned below them. */
+  .buzz-onboarding-welcome {
+    height: 100%;
+    max-height: none;
+    align-items: stretch;
+    padding: calc(env(safe-area-inset-top) + 1rem) 1.5rem
+      calc(env(safe-area-inset-bottom) + 4.5rem);
+  }
+  /* Actions now sit at the bottom: drop the bottom fade that washed them out
+     and keep the decorative bees behind the content. */
+  .buzz-onboarding-welcome > div[class*="bg-[linear-gradient"] {
+    display: none;
+  }
+  .buzz-onboarding-welcome > div:has(.buzz-onboarding-slide) {
+    position: relative;
+    z-index: 1;
+  }
+  .buzz-onboarding-welcome > div:has(.buzz-onboarding-slide),
+  .buzz-onboarding-welcome .buzz-onboarding-slide,
+  .buzz-onboarding-welcome .buzz-onboarding-transition-line,
+  .buzz-onboarding-welcome .buzz-onboarding-transition-content {
+    height: 100%;
+    margin: 0;
+  }
+  .buzz-onboarding-welcome img[src*="buzz-wordmark"] {
+    width: 76%;
+    max-width: 19rem;
+    margin-top: auto;
+  }
+  .buzz-onboarding-welcome img[src*="buzz-wordmark"] + p {
+    max-width: 19rem;
+    margin-top: 1rem;
+    font-size: 1.25rem;
+    line-height: 1.35;
+    text-wrap: balance;
+  }
+  .buzz-onboarding-welcome
+    .buzz-onboarding-transition-content
+    > div:has(> button) {
+    width: 100%;
+    max-width: 22rem;
+    margin-top: auto;
+    gap: 0.625rem;
+  }
+  .buzz-onboarding-welcome .buzz-onboarding-transition-content > div > button {
+    width: 100%;
+    height: 3.25rem;
+    font-size: 1rem;
+  }
+
+  /* --- Onboarding: steps as a bottom sheet ---------------------------------- */
+  .buzz-startup-shell:has(> [data-testid="onboarding-content-card"]) {
+    height: 100%;
+    max-height: none;
+    align-items: flex-end;
+    padding: calc(env(safe-area-inset-top) + 4.25rem) 0 0;
+  }
+  [data-testid="onboarding-content-card"] {
+    width: 100%;
+    height: 100%;
+    border-radius: 1.75rem 1.75rem 0 0;
+    padding: 1.75rem 1.5rem calc(env(safe-area-inset-bottom) + 1rem);
+    box-shadow: 0 -8px 32px rgb(0 0 0 / 0.08);
+  }
+
+  /* --- Drawer ------------------------------------------------------------- */
+  /* Desktop shortcut hints mean nothing on a phone. */
+  [data-mobile="true"] kbd,
+  [role="dialog"] kbd {
+    display: none;
+  }
+
+  /* --- Dialogs become bottom sheets ---------------------------------------- */
+  [data-testid="dialog-overlay"] + div {
+    bottom: var(--buzz-keyboard-inset, 0px);
+    place-items: end stretch;
+    padding: calc(env(safe-area-inset-top) + 2.5rem) 0 0;
+  }
+  [data-testid="dialog-overlay"]
+    + div
+    > [role="dialog"]:not(.buzz-card-textured) {
+    align-self: end;
+    justify-self: stretch;
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    max-height: 100%;
+    overflow-y: auto;
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  }
+  :root[data-keyboard-open]
+    [data-testid="dialog-overlay"]
+    + div
+    > [role="dialog"]:not(.buzz-card-textured) {
+    padding-bottom: 1rem;
+  }
+  /* Search is a full-height sheet, results under the thumb-reachable field. */
+  [data-testid="dialog-overlay"] + div > [data-testid="search-results"] {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  [data-testid="search-results"] > .max-h-96 {
+    flex: 1;
+    max-height: none;
+  }
+  [data-testid="search-current-channel-control"] > span:last-child {
+    display: none;
+  }
+  [data-testid="dialog-overlay"] + div > [role="dialog"][data-state="open"] {
+    animation: buzz-sheet-in 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-testid="dialog-overlay"] + div > [role="dialog"][data-state="closed"] {
+    animation: buzz-sheet-out 200ms ease-in forwards;
+  }
+  [data-sidebar="sidebar"][data-mobile="true"] {
+    width: min(85vw, 22rem);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  [data-mobile="true"] [data-sidebar="menu-button"],
+  [data-testid="settings-sidebar"] [data-sidebar="menu-button"] {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+
+  /* --- Settings: a list screen pushing full-bleed section screens --------- */
+  [data-testid="settings-sidebar-top-chrome"] {
+    display: none;
+  }
+  [data-testid="settings-mobile-back"] {
+    background: hsl(var(--background));
+    border-bottom: 1px solid hsl(var(--border) / 0.6);
+  }
+  [data-testid="settings-content-surface"] {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* --- Messages: actions appear on long press ------------------------------ */
+  [data-testid="message-row"] {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  [data-testid="message-row"] [data-testid^="message-action-bar-"] {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease-out;
+  }
+  /* Taps leave :hover behind on touch screens; only long press highlights. */
+  [data-testid="message-row"]:hover:not([data-touch-actions]) {
+    background-color: transparent;
+  }
+  [data-testid="message-row"][data-touch-actions] {
+    background: hsl(var(--muted) / 0.7);
+  }
+  /* Float the revealed actions over the row's top edge, like desktop's
+     floating placement, with thumb-sized buttons. */
+  [data-testid="message-row"][data-touch-actions]
+    [data-testid^="message-action-bar-"] {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(-62%);
+  }
+  [data-testid^="message-action-bar-"] > div {
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  }
+  [data-testid^="message-action-bar-"] button {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+
+  /* --- Composer ------------------------------------------------------------ */
+  /* 16px text keeps iOS from zooming into the field on focus. */
+  [data-testid="message-composer"] [contenteditable="true"],
+  input,
+  textarea {
+    font-size: 1rem;
+  }
+  /* A compact composer: edge-close, no desktop breathing room. */
+  footer:has([data-testid="message-composer"]) {
+    padding-inline: 0.5rem;
+  }
+  [data-testid="message-composer"] {
+    padding: 0.625rem 0.75rem 0.25rem;
+    border-radius: 1.375rem;
+  }
+  [data-testid="message-composer"] .composer-dock-quiet-spacer {
+    display: none;
+  }
+  [data-testid="message-composer-toolbar"] {
+    margin-top: 0.25rem;
+  }
+  [data-testid="message-composer-toolbar"] button,
+  [data-testid="composer-ingress-controls"] > div {
+    min-width: 2.5rem;
+    height: 2.5rem;
+  }
+  /* A solid bar instead of the desktop glass backdrop. */
+  [data-testid="composer-dock-backdrop"],
+  [data-testid="channel-composer-overlay"]::before,
+  [data-testid="thread-composer-overlay"]::before {
+    display: none;
+  }
+  [data-testid="channel-composer-overlay"],
+  [data-testid="thread-composer-overlay"] {
+    background: hsl(var(--background));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  :root[data-keyboard-open] [data-testid="channel-composer-overlay"],
+  :root[data-keyboard-open] [data-testid="thread-composer-overlay"] {
+    padding-bottom: 0;
+  }
+}
+
+@keyframes buzz-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes buzz-sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}

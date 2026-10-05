@@ -44,6 +44,7 @@ import { useNow } from "@/shared/lib/useNow";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import { resolveModelLabel } from "@/features/agents/lib/formatAgentModelLabel";
+import { isWebBuild } from "@/web/capabilities";
 
 type UserProfilePopoverProps = {
   children: React.ReactNode;
@@ -335,11 +336,12 @@ function UserProfilePopoverBody({
   const isCurrentUserOwner = ownsAuthorAgent(profile, currentPubkey);
   const viewerIsOwner = isCurrentUserOwner || isOwner === true;
   const showHuddleAction =
-    showHumanProfileActions ||
-    (showProfileActions &&
-      isBotProfile &&
-      viewerIsOwner &&
-      !isAgentClassificationPending);
+    !isWebBuild &&
+    (showHumanProfileActions ||
+      (showProfileActions &&
+        isBotProfile &&
+        viewerIsOwner &&
+        !isAgentClassificationPending));
   const showMessageAction =
     showProfileActions &&
     !isAgentClassificationPending &&
