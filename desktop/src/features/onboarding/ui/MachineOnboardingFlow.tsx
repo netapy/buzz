@@ -42,6 +42,8 @@ import {
 import { SetupStep } from "./SetupStep";
 import type { HarnessConnectionMethod } from "./harnessConnectionOptions";
 import type { DefaultConfigDraft } from "./types";
+import { isWebBuild } from "@/web/capabilities";
+import { DesktopPairingSignIn } from "@/web/DesktopPairingSignIn";
 
 export type MachineOnboardingPage =
   | "identity"
@@ -280,6 +282,15 @@ export function MachineOnboardingFlow({
     }
     setPage("setup");
   }, [configBackTarget]);
+
+  // Browser builds have no local agent harnesses; finish where desktop
+  // continues to harness setup.
+  React.useLayoutEffect(() => {
+    if (isWebBuild && page === "setup")
+      complete(selectedPubkey ?? undefined, {
+        continueToProfile: !identityWasImported,
+      });
+  }, [complete, identityWasImported, page, selectedPubkey]);
 
   const chromeBackAction =
     page === "identity-key-help"
@@ -533,6 +544,12 @@ export function MachineOnboardingFlow({
                     </p>
                   )}
                 </div>
+                {isWebBuild && keyImportStage === "key-entry" ? (
+                  <DesktopPairingSignIn
+                    disabled={isPending || isKeyImporting}
+                    onSignedIn={() => void loadRecoveredIdentity()}
+                  />
+                ) : null}
               </motion.div>
               <div className="mt-8 w-full">
                 <div className="flex flex-col items-stretch">

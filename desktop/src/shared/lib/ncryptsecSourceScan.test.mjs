@@ -37,6 +37,10 @@ const ALLOWLIST = [
   "features/settings/ui/BackupTestFlow.tsx",
   "features/settings/ui/EncryptedBackupCreator.tsx",
   "features/settings/ui/ProfileSettingsCard.tsx",
+  // Browser build identity layer (stands in for the Rust commands):
+  "web/backup.ts",
+  "web/backup.test.mjs",
+  "web/nip49.worker.ts",
   // e2e-only mock bridge (never in the production bundle):
   "testing/e2eBridge.ts",
   // this scan:

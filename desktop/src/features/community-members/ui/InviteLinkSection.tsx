@@ -15,6 +15,7 @@ import {
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
+import { isWebBuild } from "@/web/capabilities";
 
 const TTL_OPTIONS: { label: string; value: number }[] = [
   { label: "1 day", value: 24 * 60 * 60 },
@@ -32,7 +33,10 @@ const MAX_USE_OPTIONS: { label: string; value: number | null }[] = [
   { label: "25 uses", value: 25 },
 ];
 
-export const DEFAULT_INVITE_TTL_SECS = TTL_OPTIONS[1].value;
+// The Ordalie web build defaults invite links to one use within a day, so a
+// forwarded or leaked link cannot admit anyone else.
+export const DEFAULT_INVITE_TTL_SECS = TTL_OPTIONS[isWebBuild ? 0 : 1].value;
+const DEFAULT_INVITE_MAX_USES = isWebBuild ? 1 : null;
 
 type CopyStatus = "idle" | "copying" | "copied";
 type GenerationStatus = "idle" | "generating" | "failed";
@@ -55,7 +59,9 @@ export function InviteLinkSection({
   const [generationStatus, setGenerationStatus] =
     React.useState<GenerationStatus>("generating");
   const [inviteUrl, setInviteUrl] = React.useState("");
-  const [maxUses, setMaxUses] = React.useState<number | null>(null);
+  const [maxUses, setMaxUses] = React.useState<number | null>(
+    DEFAULT_INVITE_MAX_USES,
+  );
   const generationRequestId = React.useRef(0);
   // React StrictMode replays effects in development. Keep one in-flight mint
   // per setting set so the replay observes the original request instead of

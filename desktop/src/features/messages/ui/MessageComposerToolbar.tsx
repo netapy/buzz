@@ -14,6 +14,7 @@ import {
 import { ComposerEmojiPicker } from "./ComposerEmojiPicker";
 import { FormattingToolbar } from "./FormattingToolbar";
 import { SelectionFormattingTray } from "./SelectionFormattingTray";
+import { isWebBuild } from "@/web/capabilities";
 
 /** Spring for enter/exit of button groups — all fire simultaneously. */
 const presenceSpring = {
@@ -260,7 +261,7 @@ export const MessageComposerToolbar = React.memo(
                   </TooltipTrigger>
                   <TooltipContent>Attach file</TooltipContent>
                 </Tooltip>
-                {onVoiceNote ? (
+                {onVoiceNote && !isWebBuild ? (
                   <Tooltip disableHoverableContent>
                     <TooltipTrigger asChild>
                       <Button

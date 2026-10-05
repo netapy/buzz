@@ -2,6 +2,7 @@ import type { Community } from "./types";
 import { homeDir } from "@tauri-apps/api/path";
 import { setLocalStorageItemWithRecovery } from "@/shared/lib/localStorageQuota";
 import { getStorageItem, removeStorageItem } from "@/shared/lib/safeStorage";
+import { browserCommunityName } from "@/web/capabilities";
 
 const COMMUNITIES_KEY = "buzz-communities";
 const ACTIVE_COMMUNITY_KEY = "buzz-active-community-id";
@@ -191,6 +192,8 @@ export function deriveCommunityName(relayUrl: string): string {
       relayUrl.replace("ws://", "http://").replace("wss://", "https://"),
     );
     const host = url.hostname;
+    const browserName = browserCommunityName(host);
+    if (browserName) return browserName;
     if (isLocalRelayHost(host)) {
       return "Local Dev";
     }

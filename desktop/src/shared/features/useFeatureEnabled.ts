@@ -2,6 +2,7 @@ import { useSyncExternalStore, useCallback, useEffect } from "react";
 import { getFeature } from "./manifest";
 import { resolveEnabled } from "./resolveEnabled";
 import { getOverrides, setOverride, OVERRIDES_KEY } from "./store";
+import { isUnavailableInBrowser } from "@/web/capabilities";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -91,6 +92,7 @@ export function useFeatureSnapshot(): Record<string, boolean> {
  */
 export function useFeatureEnabled(featureId: string): boolean {
   const overrides = useFeatureSnapshot();
+  if (isUnavailableInBrowser(featureId)) return false;
 
   const feature = getFeature(featureId);
   if (!feature) {

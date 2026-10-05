@@ -24,6 +24,7 @@ import {
   toggleTerminalPanel,
   useTerminalPanel,
 } from "@/features/terminal/terminalPanelStore";
+import { isWebBuild } from "@/web/capabilities";
 
 const DM_HEADER_AVATAR_SIZE = 32;
 const DM_HEADER_AVATAR_STATUS_GEOMETRY = scaleProfileAvatarStatusGeometry(
@@ -84,20 +85,21 @@ export function ChannelScreenHeader({
     onJoinChannel;
 
   const terminalPanel = useTerminalPanel();
-  const terminalButton = activeChannel ? (
-    <Button
-      aria-label={
-        terminalPanel.mode === "closed" ? "Open Buzz Term" : "Hide Buzz Term"
-      }
-      onClick={toggleTerminalPanel}
-      size="icon"
-      title="Buzz Term (⌘J)"
-      type="button"
-      variant={terminalPanel.mode === "closed" ? "outline" : "secondary"}
-    >
-      <SquareTerminal />
-    </Button>
-  ) : null;
+  const terminalButton =
+    activeChannel && !isWebBuild ? (
+      <Button
+        aria-label={
+          terminalPanel.mode === "closed" ? "Open Buzz Term" : "Hide Buzz Term"
+        }
+        onClick={toggleTerminalPanel}
+        size="icon"
+        title="Buzz Term (⌘J)"
+        type="button"
+        variant={terminalPanel.mode === "closed" ? "outline" : "secondary"}
+      >
+        <SquareTerminal />
+      </Button>
+    ) : null;
   const channelActions = activeChannel ? (
     showJoinButton ? (
       <div className="flex items-center gap-1">

@@ -7,6 +7,11 @@ import {
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import { isLinuxPlatform, isMacPlatform } from "@/shared/lib/platform";
+import { isWebBuild } from "@/web/capabilities";
+import {
+  setBrowserAppBadge,
+  showBrowserNotification,
+} from "@/web/notifications";
 
 // Backend event emitted when a native Linux notification is clicked or a
 // queued macOS activation becomes available. See src-tauri notification code.
@@ -324,6 +329,9 @@ export async function setDesktopAppBadge(state: AppBadgeState): Promise<void> {
     testWindow.__BUZZ_E2E_APP_BADGE_STATE__ = state.kind;
   }
 
+  if (isWebBuild) {
+    return setBrowserAppBadge(state);
+  }
   if (!isTauri()) {
     return;
   }
@@ -441,6 +449,10 @@ export async function sendDesktopNotification(
       // used by Tauri dev. Preserve the previous macOS development behavior by
       // falling through to the notification plugin; packaged apps use native UN.
     }
+  }
+
+  if (isWebBuild) {
+    return showBrowserNotification(payload.title, payload.body, payload.target);
   }
 
   // block/buzz#5081 — WebKit throws `NotificationError` from the constructor

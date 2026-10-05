@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { buzzWeb } from "./vite.web";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -10,27 +11,6 @@ export default defineConfig(async ({ mode }) => {
   const modeEnv = loadEnv(mode, __dirname, "");
   const protectedFeaturesEnabled =
     (process.env.VITE_BUZZ_BESTIE ?? modeEnv.VITE_BUZZ_BESTIE) === "1";
-
-  const sharedAliases = {
-    "@": "/src",
-    "@features-manifest": path.resolve(__dirname, "../preview-features.json"),
-    "@protected-features": path.resolve(
-      __dirname,
-      protectedFeaturesEnabled
-        ? "./src/protectedFeatures/internal.ts"
-        : "./src/protectedFeatures/public.ts",
-    ),
-    "@protected-feature-components": path.resolve(
-      __dirname,
-      protectedFeaturesEnabled
-        ? "./src/protectedFeatures/internalUi.ts"
-        : "./src/protectedFeatures/publicUi.ts",
-    ),
-    "@model-capabilities-manifest": path.resolve(
-      __dirname,
-      "../scripts/model-capabilities.json",
-    ),
-  };
 
   return {
     plugins: [
@@ -46,50 +26,32 @@ export default defineConfig(async ({ mode }) => {
         ],
       }),
       react(),
+      mode === "web" && buzzWeb(),
     ],
     resolve: {
-      alias:
-        mode === "web"
-          ? [
-              {
-                find: /^@tauri-apps\/(?:api|plugin-[^/]+)(?:\/.*)?$/,
-                replacement: path.resolve(__dirname, "src/web/tauri.ts"),
-              },
-              { find: "@", replacement: "/src" },
-              {
-                find: "@features-manifest",
-                replacement: path.resolve(
-                  __dirname,
-                  "../preview-features.json",
-                ),
-              },
-              {
-                find: "@protected-features",
-                replacement: path.resolve(
-                  __dirname,
-                  protectedFeaturesEnabled
-                    ? "./src/protectedFeatures/internal.ts"
-                    : "./src/protectedFeatures/public.ts",
-                ),
-              },
-              {
-                find: "@protected-feature-components",
-                replacement: path.resolve(
-                  __dirname,
-                  protectedFeaturesEnabled
-                    ? "./src/protectedFeatures/internalUi.ts"
-                    : "./src/protectedFeatures/publicUi.ts",
-                ),
-              },
-              {
-                find: "@model-capabilities-manifest",
-                replacement: path.resolve(
-                  __dirname,
-                  "../scripts/model-capabilities.json",
-                ),
-              },
-            ]
-          : sharedAliases,
+      alias: {
+        "@": "/src",
+        "@features-manifest": path.resolve(
+          __dirname,
+          "../preview-features.json",
+        ),
+        "@protected-features": path.resolve(
+          __dirname,
+          protectedFeaturesEnabled
+            ? "./src/protectedFeatures/internal.ts"
+            : "./src/protectedFeatures/public.ts",
+        ),
+        "@protected-feature-components": path.resolve(
+          __dirname,
+          protectedFeaturesEnabled
+            ? "./src/protectedFeatures/internalUi.ts"
+            : "./src/protectedFeatures/publicUi.ts",
+        ),
+        "@model-capabilities-manifest": path.resolve(
+          __dirname,
+          "../scripts/model-capabilities.json",
+        ),
+      },
     },
 
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

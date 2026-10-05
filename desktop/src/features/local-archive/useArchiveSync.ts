@@ -7,6 +7,7 @@ import {
   startArchiveSync,
   stopArchiveSync,
 } from "@/shared/api/tauriArchive";
+import { isWebBuild } from "@/web/capabilities";
 
 /**
  * This realm's epoch, announced once at first use.
@@ -58,7 +59,8 @@ function archiveSyncEpoch(): Promise<number> {
  */
 export function useArchiveSync(ready: boolean): void {
   React.useEffect(() => {
-    if (!ready) return;
+    // The browser build has no local archive store.
+    if (!ready || isWebBuild) return;
     // Companion realms do not participate; see the ownership rule above.
     if (huddleWindowChannelId() !== null) return;
 

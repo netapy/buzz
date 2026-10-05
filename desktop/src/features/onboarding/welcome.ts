@@ -4,6 +4,7 @@ import type {
   CreateChannelInput,
   UpdateChannelInput,
 } from "@/shared/api/types";
+import { isWebBuild } from "@/web/capabilities";
 
 export const WELCOME_CHANNEL_NAME = "Welcome";
 export const WELCOME_CHANNEL_DESCRIPTION =
@@ -152,7 +153,10 @@ export function isStarterWelcomeChannel(channel: Channel | null | undefined) {
 export function isWelcomeExperienceChannel(
   channel: Channel | null | undefined,
 ) {
-  return isWelcomeChannel(channel) || isStarterWelcomeChannel(channel);
+  return (
+    !isWebBuild &&
+    (isWelcomeChannel(channel) || isStarterWelcomeChannel(channel))
+  );
 }
 
 function isPrivateWelcomeChannelCandidate(channel: Channel) {
@@ -229,6 +233,11 @@ export async function ensureWelcomeChannel(
   options: WelcomeChannelOptions = {},
 ) {
   const channels = await client.getChannels();
+  // Browser builds have no local agents for the private Welcome team; new
+  // members land in the community's #welcome-everyone instead.
+  const starterWelcome =
+    isWebBuild && findStarterChannel(channels, STARTER_WELCOME_CHANNEL_NAME);
+  if (starterWelcome) return starterWelcome;
   const existingWelcome = findPrivateWelcomeChannel(channels, options);
   if (options.replaceExisting && existingWelcome) {
     if (!client.deleteChannel) {

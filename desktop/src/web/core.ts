@@ -145,9 +145,14 @@ export function relayHttpUrl(): string {
   return url.origin;
 }
 
+export type InvokeOptions = { headers?: HeadersInit };
+
 export type CommandTable = Record<
   string,
-  (args: Record<string, unknown>) => unknown | Promise<unknown>
+  (
+    args: Record<string, unknown>,
+    options?: InvokeOptions,
+  ) => unknown | Promise<unknown>
 >;
 
 export type RelayEvent = {
@@ -294,26 +299,6 @@ export function archivedPubkeysFromSnapshot(
   }
 }
 
-export async function resolveThread(parentEventId: string) {
-  const [parent] = await relayQuery([
-    {
-      ids: [parentEventId],
-      kinds: [9, 40002, 45001, 45003, 48100],
-      limit: 1,
-    },
-  ]);
-  if (!parent) throw new Error("Parent event not found.");
-  const root =
-    parent.tags.find(
-      (candidate) => candidate[0] === "e" && candidate[3] === "root",
-    )?.[1] ??
-    parent.tags.find(
-      (candidate) => candidate[0] === "e" && candidate[3] === "reply",
-    )?.[1] ??
-    parentEventId;
-  return { parent: parentEventId, root };
-}
-
 export function rawProfile(event: RelayEvent | undefined, pubkey: string) {
   const content = event ? JSON.parse(event.content || "{}") : {};
   const ownerPubkey = event ? nipOaOwner(event) : null;
@@ -335,45 +320,10 @@ export async function getRawProfile(pubkey = getPublicKey(requireSecretKey())) {
   return rawProfile(events[0], pubkey);
 }
 
-export function rawChannel(event: RelayEvent, isMember = true) {
-  const channelId = tag(event, "d") ?? "";
-  const channelType =
-    tag(event, "t") ??
-    (event.tags.some((candidate) => candidate[0] === "hidden")
-      ? "dm"
-      : "stream");
-  const participants = event.tags
-    .filter((candidate) => candidate[0] === "p")
-    .map((candidate) => candidate[1]);
-  return {
-    id: channelId,
-    name: tag(event, "name") ?? "",
-    channel_type: channelType,
-    visibility:
-      event.tags.some((candidate) => candidate[0] === "private") ||
-      tag(event, "visibility") === "private"
-        ? "private"
-        : "open",
-    description: tag(event, "about") ?? "",
-    topic: tag(event, "topic"),
-    purpose: tag(event, "purpose"),
-    member_count: 0,
-    member_pubkeys: [] as string[],
-    last_message_at: null as string | null,
-    archived_at:
-      tag(event, "archived") === "true"
-        ? new Date(event.created_at * 1000).toISOString()
-        : null,
-    participants,
-    participant_pubkeys: participants,
-    is_member: isMember,
-    ttl_seconds: tag(event, "ttl") ? Number(tag(event, "ttl")) : null,
-    ttl_deadline: tag(event, "ttl_deadline"),
-  };
-}
-
-export function rawChannelDetail(event: RelayEvent) {
-  const channel = rawChannel(event);
+export function rawChannelDetail<C extends object>(
+  event: RelayEvent,
+  channel: C,
+) {
   const timestamp = new Date(event.created_at * 1000).toISOString();
   return {
     ...channel,
@@ -407,28 +357,6 @@ export function rawForumPost(event: RelayEvent, channelId: string) {
       participants: [],
     },
     reactions: null,
-  };
-}
-
-export function rawForumReply(
-  event: RelayEvent,
-  channelId: string,
-  rootEventId: string,
-) {
-  const parent =
-    event.tags.find(
-      (candidate) => candidate[0] === "e" && candidate[3] === "reply",
-    )?.[1] ?? rootEventId;
-  const root =
-    event.tags.find(
-      (candidate) => candidate[0] === "e" && candidate[3] === "root",
-    )?.[1] ?? rootEventId;
-  return {
-    ...rawForumPost(event, channelId),
-    parent_event_id: parent,
-    root_event_id: root,
-    depth: parent === root ? 1 : 2,
-    broadcast: false,
   };
 }
 
@@ -552,7 +480,7 @@ export function blossomAuth(verb: "get" | "upload", hash?: string) {
   const now = Math.floor(Date.now() / 1000);
   const tags = [
     ["t", verb],
-    ["expiration", String(now + (verb === "get" ? 600 : 3600))],
+    ["expiration", String(now + (verb === "get" ? 60 : 3600))],
     ["server", new URL(relayHttpUrl()).host],
   ];
   if (hash) tags.splice(1, 0, ["x", hash]);
@@ -607,40 +535,6 @@ export async function prepareImageForUpload(
   }
 }
 
-export async function uploadBytes(data: Uint8Array, filename?: string) {
-  if (data.length === 0) throw new Error("Empty upload.");
-  let type = mimeType(data, filename);
-  const originalType = type;
-  if (type.startsWith("image/")) {
-    const prepared = await prepareImageForUpload(data, type, filename);
-    data = prepared.data;
-    type = prepared.type;
-    if (filename && type !== originalType) {
-      const extension = type === "image/jpeg" ? "jpg" : type.split("/")[1];
-      filename = `${filename.replace(/\.[^./\\]+$/, "")}.${extension}`;
-    }
-  }
-  const hash = Array.from(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", buffer(data))),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
-  const response = await fetch(`${relayHttpUrl()}/upload`, {
-    method: "PUT",
-    headers: {
-      Authorization: blossomAuth("upload", hash),
-      "Content-Type": type,
-      "X-SHA-256": hash,
-    },
-    body: buffer(data),
-  });
-  const error = response.ok ? "" : await response.text();
-  if (!response.ok) throw new Error(error || "Upload failed.");
-  return {
-    ...(await response.json()),
-    ...(filename ? { filename: filename.split(/[\\/]/).pop() } : {}),
-  };
-}
-
 export async function pickFiles(accept: string, multiple: boolean) {
   const input = document.createElement("input");
   input.type = "file";
@@ -654,53 +548,6 @@ export async function pickFiles(accept: string, multiple: boolean) {
     );
     input.click();
   });
-}
-
-export async function getRawChannels() {
-  const pubkey = getPublicKey(requireSecretKey());
-  const [memberEvents, metadata, hidden] = await Promise.all([
-    relayQuery([{ kinds: [39002], "#p": [pubkey], limit: 1000 }]),
-    relayQuery([{ kinds: [39000], limit: 1000 }]),
-    relayQuery([{ kinds: [30622], "#p": [pubkey], limit: 1 }]),
-  ]);
-  const memberIds = new Set(
-    memberEvents.map((event) => tag(event, "d")).filter(Boolean),
-  );
-  const hiddenIds = new Set(
-    hidden[0]?.tags
-      .filter((candidate) => candidate[0] === "h")
-      .map((candidate) => candidate[1]) ?? [],
-  );
-  const channels = metadata
-    .map((event) => rawChannel(event, memberIds.has(tag(event, "d") ?? "")))
-    .filter(
-      (channel) => channel.channel_type !== "dm" || !hiddenIds.has(channel.id),
-    );
-  const ids = channels.map((channel) => channel.id);
-  if (ids.length === 0) return channels;
-  const [members, messages] = await Promise.all([
-    relayQuery([{ kinds: [39002], "#d": ids, limit: ids.length }]),
-    relayQuery(
-      ids.map((channelId) => ({
-        kinds: [9, 40002],
-        "#h": [channelId],
-        limit: 1,
-      })),
-    ),
-  ]);
-  for (const channel of channels) {
-    const memberEvent = members.find((event) => tag(event, "d") === channel.id);
-    channel.member_pubkeys =
-      memberEvent?.tags
-        .filter((candidate) => candidate[0] === "p")
-        .map((candidate) => candidate[1]) ?? [];
-    channel.member_count = new Set(channel.member_pubkeys).size;
-    const message = messages.find((event) => tag(event, "h") === channel.id);
-    channel.last_message_at = message
-      ? new Date(message.created_at * 1000).toISOString()
-      : null;
-  }
-  return channels;
 }
 
 export const STARTER_CHANNELS = [
@@ -717,7 +564,12 @@ export const STARTER_CHANNELS = [
 ] as const;
 
 export function isStarterChannel(
-  channel: ReturnType<typeof rawChannel>,
+  channel: {
+    name: string;
+    channel_type: string;
+    visibility: string;
+    archived_at: string | null;
+  },
   spec: (typeof STARTER_CHANNELS)[number],
 ) {
   return (
@@ -746,67 +598,4 @@ export async function starterChannelId(slug: string) {
     byte.toString(16).padStart(2, "0"),
   ).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-export async function ensureRawStarterChannels() {
-  let channels = await getRawChannels();
-  const created = new Set<string>();
-  const ids: string[] = [];
-
-  for (const spec of STARTER_CHANNELS) {
-    if (channels.some((channel) => isStarterChannel(channel, spec))) continue;
-    const id = await starterChannelId(spec.slug);
-    ids.push(id);
-    try {
-      await publish(9007, "", [
-        ["h", id],
-        ["name", spec.name],
-        ["visibility", "open"],
-        ["channel_type", "stream"],
-        ["about", spec.description],
-      ]);
-    } catch (error) {
-      if (!String(error).includes("duplicate: channel already exists"))
-        throw error;
-    }
-    created.add(id);
-  }
-
-  for (let attempt = 0; ids.length > 0 && attempt < 3; attempt++) {
-    const metadata = await relayQuery([
-      { kinds: [39000], "#d": ids, limit: ids.length },
-    ]);
-    for (const event of metadata) {
-      const candidate = rawChannel(event, created.has(tag(event, "d") ?? ""));
-      if (!channels.some((channel) => channel.id === candidate.id))
-        channels.push(candidate);
-    }
-    if (
-      STARTER_CHANNELS.every((spec) =>
-        channels.some((channel) => isStarterChannel(channel, spec)),
-      )
-    )
-      break;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-
-  if (
-    !STARTER_CHANNELS.every((spec) =>
-      channels.some((channel) => isStarterChannel(channel, spec)),
-    )
-  )
-    channels = await getRawChannels();
-
-  for (const spec of STARTER_CHANNELS) {
-    const channel = channels.find((candidate) =>
-      isStarterChannel(candidate, spec),
-    );
-    if (!channel)
-      throw new Error("Starter channels were not available after setup");
-    if (!channel.is_member) {
-      await publish(9021, "", [["h", channel.id]]);
-      channel.is_member = true;
-    }
-  }
-  return channels;
 }

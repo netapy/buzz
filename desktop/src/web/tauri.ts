@@ -1,35 +1,19 @@
-import {
-  finalizeEvent,
-  generateSecretKey,
-  getPublicKey,
-  nip19,
-  nip44,
-} from "nostr-tools";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { generateSecretKey, getPublicKey, nip19, nip44 } from "nostr-tools";
 
 import { truncatePubkey } from "@/shared/lib/pubkey";
 
 import {
-  type RelayEvent,
   VAULT_DATABASE,
   archivedPubkeysFromSnapshot,
   blossomAuth,
-  bytesToBase64,
-  encoder,
-  ensureRawStarterChannels,
   getChannelMetadata,
   getLockedPubkey,
-  getRawChannels,
   getRawProfile,
   getSecretKey,
   loadIdentity,
   parseCommandResponse,
-  pickFiles,
   publish,
-  rawChannel,
   rawChannelDetail,
-  rawForumPost,
-  rawForumReply,
   rawNote,
   rawNotes,
   rawProfile,
@@ -38,19 +22,28 @@ import {
   relayQuery,
   relayWsUrl,
   requireSecretKey,
-  resolveThread,
   saveIdentity,
   setActiveRelayUrl,
   setIdentity,
   signEvent,
   submitEvent,
   tag,
-  uploadBytes,
 } from "./core";
-import type { CommandTable } from "./core";
+import type { CommandTable, InvokeOptions } from "./core";
+import { backupCommands } from "./backup";
+import { channelInfo, chatCommands } from "./chat";
+import { mediaCommands } from "./media";
+import { NATIVE_ONLY_COMMANDS } from "./nativeOnly";
+import { attachNotificationClickBridge } from "./notifications";
+import { pairingCommands } from "./pairing";
 
 // Domain modules register browser implementations of native commands here.
-const commandTables: CommandTable[] = [];
+const commandTables: CommandTable[] = [
+  backupCommands,
+  chatCommands,
+  mediaCommands,
+  pairingCommands,
+];
 
 export { archivedPubkeysFromSnapshot, prepareImageForUpload } from "./core";
 
@@ -72,14 +65,23 @@ function attachMediaAuthBridge(): void {
   });
 }
 
+function reloadOnStaleChunks(): void {
+  // A deploy replaced this build's lazy chunks; reload onto the new build,
+  // at most once a minute so a genuinely broken chunk still surfaces.
+  window.addEventListener("vite:preloadError", (event) => {
+    const last = Number(sessionStorage.getItem("buzz-web-chunk-reload"));
+    if (Date.now() - last < 60_000) return;
+    event.preventDefault();
+    sessionStorage.setItem("buzz-web-chunk-reload", String(Date.now()));
+    location.reload();
+  });
+}
+
 export async function initializeBrowserIdentity(): Promise<void> {
-  const manifest = document.createElement("link");
-  manifest.rel = "manifest";
-  manifest.href = "/manifest.webmanifest";
-  document.head.append(manifest);
+  reloadOnStaleChunks();
   attachMediaAuthBridge();
-  if ("serviceWorker" in navigator)
-    void navigator.serviceWorker.register("/sw.js?v=20260816-media-auth");
+  attachNotificationClickBridge();
+  void navigator.serviceWorker?.register("/sw.js", { updateViaCache: "none" });
   void navigator.storage?.persist?.();
   const stored = await loadIdentity();
   if (stored || getLockedPubkey()) {
@@ -115,6 +117,27 @@ async function paceRelayRead(frame: string): Promise<void> {
     );
 }
 
+// `https://<relay>/invite/<code>` lands on the PWA (the relay mints these
+// links); hand it to the same join flow desktop runs for `buzz://join`.
+const INVITE_LINK_ID = "browser-invite-link";
+let inviteLinkTaken = false;
+
+function takeInviteLink() {
+  const code = /^\/invite\/([A-Za-z0-9._~-]{1,256})\/?$/.exec(
+    location.pathname,
+  )?.[1];
+  if (!code || inviteLinkTaken) return null;
+  inviteLinkTaken = true;
+  return {
+    id: INVITE_LINK_ID,
+    kind: "join",
+    relayUrl: relayWsUrl(),
+    code,
+    name: null,
+    policyReceipt: null,
+  };
+}
+
 export class Channel<T = unknown> {
   readonly id = crypto.randomUUID();
   onmessage: (message: T) => void;
@@ -127,11 +150,12 @@ export class Channel<T = unknown> {
 export async function invoke<T>(
   command: string,
   args: Record<string, unknown> = {},
+  options?: InvokeOptions,
 ): Promise<T> {
   const handler = commandTables.find((table) =>
     Object.hasOwn(table, command),
   )?.[command];
-  if (handler) return (await handler(args)) as T;
+  if (handler) return (await handler(args, options)) as T;
   switch (command) {
     case "plugin:websocket|connect": {
       const id = nextSocketId++;
@@ -189,10 +213,13 @@ export async function invoke<T>(
       setActiveRelayUrl(String(args.relayUrl || relayWsUrl()));
       return undefined as T;
     case "validate_repos_dir":
-    case "acknowledge_pending_community_deep_link":
       return undefined as T;
     case "take_pending_community_deep_link":
-      return null as T;
+      return takeInviteLink() as T;
+    case "acknowledge_pending_community_deep_link":
+      if (args.id === INVITE_LINK_ID)
+        history.replaceState(history.state, "", `/${location.hash}`);
+      return true as T;
     case "get_legacy_workspace_storage":
       return {
         workspaces: null,
@@ -223,13 +250,6 @@ export async function invoke<T>(
     }
     case "get_nsec":
       return nip19.nsecEncode(requireSecretKey()) as T;
-    case "import_identity": {
-      const decoded = nip19.decode(String(args.nsec).trim());
-      if (decoded.type !== "nsec") throw new Error("Invalid nsec.");
-      await saveIdentity(decoded.data);
-      setIdentity(decoded.data);
-      return invoke<T>("get_identity");
-    }
     case "persist_current_identity":
       await saveIdentity(requireSecretKey());
       return invoke<T>("get_identity");
@@ -358,53 +378,6 @@ export async function invoke<T>(
         archived: archivedPubkeysFromSnapshot(snapshot, relaySelf),
       } as T;
     }
-    case "update_profile": {
-      const current = await getRawProfile();
-      const content = JSON.stringify({
-        display_name: args.displayName ?? current.display_name,
-        picture: args.avatarUrl ?? current.avatar_url,
-        about: args.about ?? current.about,
-        nip05: args.nip05Handle ?? current.nip05_handle,
-      });
-      const event = finalizeEvent(
-        {
-          kind: 0,
-          content,
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [],
-        },
-        requireSecretKey(),
-      );
-      await submitEvent(event);
-      return rawProfile(event, event.pubkey) as T;
-    }
-    case "get_channels": {
-      const channels = await getRawChannels();
-      return {
-        hash: bytesToBase64(sha256(encoder.encode(JSON.stringify(channels)))),
-        channels,
-        last_messages: Object.fromEntries(
-          channels
-            .filter((channel) => channel.last_message_at !== null)
-            .map((channel) => [channel.id, channel.last_message_at]),
-        ),
-      } as T;
-    }
-    case "ensure_starter_channels":
-      return (await ensureRawStarterChannels()) as T;
-    case "create_channel": {
-      const channelId = crypto.randomUUID();
-      const tags = [
-        ["h", channelId],
-        ["name", String(args.name).trim()],
-        ["visibility", String(args.visibility)],
-        ["channel_type", String(args.channelType)],
-      ];
-      if (args.description) tags.push(["about", String(args.description)]);
-      if (args.ttlSeconds) tags.push(["ttl", String(args.ttlSeconds)]);
-      await publish(9007, "", tags);
-      return rawChannel(await getChannelMetadata(channelId), true) as T;
-    }
     case "open_dm": {
       const event = signEvent(
         41010,
@@ -417,15 +390,15 @@ export async function invoke<T>(
       ) as {
         channel_id: string;
       };
-      return rawChannel(await getChannelMetadata(channelId), true) as T;
+      return channelInfo(await getChannelMetadata(channelId), true) as T;
     }
     case "hide_dm":
       await publish(41012, "", [["h", String(args.channelId)]]);
       return undefined as T;
-    case "get_channel_details":
-      return rawChannelDetail(
-        await getChannelMetadata(String(args.channelId)),
-      ) as T;
+    case "get_channel_details": {
+      const event = await getChannelMetadata(String(args.channelId));
+      return rawChannelDetail(event, channelInfo(event)) as T;
+    }
     case "update_channel": {
       const input = args.input as Record<string, unknown>;
       const tags = [["h", String(input.channelId)]];
@@ -441,9 +414,10 @@ export async function invoke<T>(
           input.ttlSeconds == null ? "" : String(input.ttlSeconds),
         ]);
       await publish(9002, "", tags);
-      return rawChannelDetail(
-        await getChannelMetadata(String(input.channelId)),
-      ) as T;
+      {
+        const event = await getChannelMetadata(String(input.channelId));
+        return rawChannelDetail(event, channelInfo(event)) as T;
+      }
     }
     case "set_channel_topic":
       await publish(9002, "", [
@@ -467,35 +441,6 @@ export async function invoke<T>(
     case "delete_channel":
       await publish(9008, "", [["h", String(args.channelId)]]);
       return undefined as T;
-    case "get_channel_members": {
-      const [members] = await relayQuery([
-        { kinds: [39002], "#d": [String(args.channelId)], limit: 1 },
-      ]);
-      if (!members) return { members: [], next_cursor: null } as T;
-      const rows = members.tags
-        .filter((candidate) => candidate[0] === "p")
-        .map((candidate) => ({
-          pubkey: candidate[1],
-          role: candidate[3] || "member",
-          is_agent: candidate[3] === "bot",
-          joined_at: null,
-          display_name: null as string | null,
-        }));
-      const profiles = await relayQuery([
-        {
-          kinds: [0],
-          authors: rows.map((row) => row.pubkey),
-          limit: rows.length,
-        },
-      ]);
-      for (const row of rows) {
-        row.display_name = rawProfile(
-          profiles.find((event) => event.pubkey === row.pubkey),
-          row.pubkey,
-        ).display_name;
-      }
-      return { members: rows, next_cursor: null } as T;
-    }
     case "add_channel_members": {
       const added: string[] = [];
       const errors: Array<{ pubkey: string; error: string }> = [];
@@ -612,47 +557,6 @@ export async function invoke<T>(
             : null,
       } as T;
     }
-    case "get_forum_posts": {
-      const limit = Math.min(Number(args.limit) || 20, 100);
-      const events = await relayQuery([
-        {
-          kinds: [45001],
-          "#h": [String(args.channelId)],
-          limit,
-          ...(args.before ? { until: Number(args.before) } : {}),
-        },
-      ]);
-      return {
-        messages: events.map((event) =>
-          rawForumPost(event, String(args.channelId)),
-        ),
-        next_cursor: events.at(-1)?.created_at ?? null,
-      } as T;
-    }
-    case "get_forum_thread": {
-      const events = await relayQuery([
-        {
-          ids: [String(args.eventId)],
-          kinds: [9, 40002, 45001, 45003],
-        },
-        {
-          kinds: [9, 45003],
-          "#e": [String(args.eventId)],
-          "#h": [String(args.channelId)],
-        },
-      ]);
-      const root = events.find((event) => event.id === args.eventId);
-      if (!root) throw new Error("Forum thread root event not found.");
-      const replies = events
-        .filter((event) => event.id !== root.id)
-        .map((event) => rawForumReply(event, String(args.channelId), root.id));
-      return {
-        root: rawForumPost(root, String(args.channelId)),
-        replies,
-        total_replies: replies.length,
-        next_cursor: null,
-      } as T;
-    }
     case "get_canvas": {
       const [event] = await relayQuery([
         {
@@ -668,12 +572,6 @@ export async function invoke<T>(
         author: event?.pubkey ?? null,
       } as T;
     }
-    case "set_canvas": {
-      const event = await publish(40100, String(args.content), [
-        ["h", String(args.channelId)],
-      ]);
-      return { ok: true, event_id: event.id } as T;
-    }
     case "get_event": {
       const [event] = await relayQuery([
         {
@@ -687,72 +585,6 @@ export async function invoke<T>(
       ]);
       if (!event) throw new Error("Event not found.");
       return JSON.stringify(event) as T;
-    }
-    case "send_channel_message": {
-      const parentId = args.parentEventId ? String(args.parentEventId) : null;
-      const thread = parentId ? await resolveThread(parentId) : null;
-      const tags: string[][] = [["h", String(args.channelId)]];
-      if (thread && thread.root === thread.parent) {
-        tags.push(["e", thread.root, "", "reply"]);
-      } else if (thread) {
-        tags.push(["e", thread.root, "", "root"]);
-        tags.push(["e", thread.parent, "", "reply"]);
-      }
-      for (const pubkey of (args.mentionPubkeys as string[] | null) ?? []) {
-        tags.push(["p", pubkey.toLowerCase()]);
-      }
-      tags.push(
-        ...((args.mediaTags as string[][] | null) ?? []),
-        ...((args.emojiTags as string[][] | null) ?? []),
-        ...((args.mentionTags as string[][] | null) ?? []),
-      );
-      const event = await publish(
-        Number(args.kind) || 9,
-        String(args.content).trim(),
-        tags,
-      );
-      return {
-        event_id: event.id,
-        parent_event_id: parentId,
-        root_event_id: thread?.root ?? null,
-        depth: !thread ? 0 : thread.root === thread.parent ? 1 : 2,
-        created_at: event.created_at,
-      } as T;
-    }
-    case "upload_media_bytes":
-      return (await uploadBytes(
-        Uint8Array.from(args.data as number[]),
-        args.filename ? String(args.filename) : undefined,
-      )) as T;
-    case "pick_and_upload_media": {
-      const files = await pickFiles("", true);
-      return (await Promise.all(
-        files.map(async (file) =>
-          uploadBytes(new Uint8Array(await file.arrayBuffer()), file.name),
-        ),
-      )) as T;
-    }
-    case "pick_and_upload_image": {
-      const [file] = await pickFiles("image/*", false);
-      return (
-        file
-          ? await uploadBytes(
-              new Uint8Array(await file.arrayBuffer()),
-              file.name,
-            )
-          : null
-      ) as T;
-    }
-    case "fetch_media_bytes": {
-      const url = new URL(String(args.url));
-      if (url.origin !== relayHttpUrl())
-        throw new Error("Media URL is outside the active community.");
-      const response = await fetch(url, {
-        headers: { Authorization: blossomAuth("get") },
-      });
-      if (!response.ok)
-        throw new Error((await response.text()) || "Media download failed.");
-      return (await response.arrayBuffer()) as T;
     }
     case "edit_message":
       await publish(40003, String(args.content).trim(), [
@@ -955,58 +787,6 @@ export async function invoke<T>(
           : [],
       ) as T;
     }
-    case "get_feed": {
-      const pubkey = getPublicKey(requireSecretKey());
-      const types = String(args.types ?? "");
-      const wants = (name: string) => !types || types.split(",").includes(name);
-      const filters: Record<string, unknown>[] = [];
-      if (wants("mentions"))
-        filters.push({
-          kinds: [9, 40002, 1, 45001, 45003],
-          "#p": [pubkey],
-          limit: Math.min(Number(args.limit) || 50, 100),
-          ...(args.since ? { since: Number(args.since) } : {}),
-        });
-      if (wants("needs_action"))
-        filters.push({
-          kinds: [46010, 46011, 46012],
-          "#p": [pubkey],
-          limit: 20,
-          ...(args.since ? { since: Number(args.since) } : {}),
-        });
-      const events = filters.length ? await relayQuery(filters) : [];
-      const item = (event: RelayEvent, category: string) => ({
-        id: event.id,
-        kind: event.kind,
-        pubkey: event.pubkey,
-        content: event.content,
-        created_at: event.created_at,
-        channel_id: tag(event, "h"),
-        channel_name: "",
-        channel_type: null,
-        tags: event.tags,
-        category,
-      });
-      const mentions = events
-        .filter((event) => event.kind < 46010 || event.kind > 46012)
-        .map((event) => item(event, "mentions"));
-      const needsAction = events
-        .filter((event) => event.kind >= 46010 && event.kind <= 46012)
-        .map((event) => item(event, "needs_action"));
-      return {
-        feed: {
-          mentions,
-          needs_action: needsAction,
-          activity: [],
-          agent_activity: [],
-        },
-        meta: {
-          since: Number(args.since) || 0,
-          total: mentions.length + needsAction.length,
-          generated_at: Math.floor(Date.now() / 1000),
-        },
-      } as T;
-    }
     case "list_relay_agents":
     case "revalidate_relay_agents": {
       const events = await relayQuery([{ kinds: [10100], limit: 1000 }]);
@@ -1141,10 +921,6 @@ export async function invoke<T>(
       const info = (await response.json()) as { supported_nips?: number[] };
       return info.supported_nips?.includes(43) as T;
     }
-    case "get_presence":
-      return Object.fromEntries(
-        ((args.pubkeys as string[]) ?? []).map((pubkey) => [pubkey, "offline"]),
-      ) as T;
     case "get_os_idle_seconds":
       return null as T;
     case "list_managed_agents":
@@ -1174,10 +950,17 @@ export async function invoke<T>(
     case "set_prevent_sleep_active":
     case "set_window_vibrancy":
     case "relay_reconnect_hook":
-    // Agent avatar trust and deep-link queues are native-only state.
+    // Agent avatar trust, agent relay admission and deep-link queues are
+    // native-only state.
     case "set_agent_avatar_communities":
+    case "set_agent_managed_profiles":
+    case "remove_community_relay":
+    case "readd_community_relay":
     case "clear_pending_navigation_deep_links":
       return undefined as T;
+    case "acknowledge_pending_entity_deep_link":
+    case "acknowledge_pending_navigation_deep_link":
+      return true as T;
     case "relay_reconnect_hook_configured":
       return false as T;
     case "get_media_proxy_port":
@@ -1190,7 +973,11 @@ export async function invoke<T>(
     case "persist_agent_effort_level":
       return undefined as T;
     default:
-      throw new Error(`Unsupported browser command: ${command}`);
+      throw new Error(
+        NATIVE_ONLY_COMMANDS.has(command)
+          ? `Unsupported browser command: ${command} needs Buzz desktop.`
+          : `Unsupported browser command: ${command}`,
+      );
   }
 }
 

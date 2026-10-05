@@ -13,6 +13,7 @@ import {
 } from "@/shared/ui/sidebar";
 import { SidebarMenuLabel } from "@/shared/ui/sidebar-menu-label";
 import { ProtectedBestieSidebarEntry } from "@protected-feature-components";
+import { isWebBuild } from "@/web/capabilities";
 
 type SidebarSelectedView =
   | "home"
@@ -155,7 +156,7 @@ export function AppSidebarPrimaryMenu({
               </SidebarMenuButton>
             </SidebarMenuItem>
           </FeatureGate>
-          <SidebarMenuItem>
+          <SidebarMenuItem className={isWebBuild ? "hidden" : undefined}>
             <SidebarMenuButton
               className="data-[active=true]:font-normal"
               data-testid="open-agents-view"

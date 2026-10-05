@@ -39,6 +39,7 @@ import {
   type OnboardingTransitionDirection,
   OnboardingSlideTransition,
 } from "./OnboardingSlideTransition";
+import { isWebBuild } from "@/web/capabilities";
 
 function isRelayMembershipDeniedError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -305,6 +306,11 @@ export function CommunityOnboardingFlow({
       setIsPending(false);
     }
   }, [finish, isPending, queryClient, relayUrl, update]);
+
+  // Browser builds have no starter agent team to introduce.
+  React.useEffect(() => {
+    if (isWebBuild && transaction?.stage === "team-intro") void finalize();
+  }, [finalize, transaction?.stage]);
 
   const backToProfile = React.useCallback(() => {
     if (isPending) return;
@@ -750,11 +756,12 @@ export function CommunityOnboardingFlow({
             ) : (
               <>
                 <h1 className="text-title font-normal">
-                  Meet your starter team
+                  {isWebBuild ? "Joining your team" : "Meet your starter team"}
                 </h1>
                 <p className="mx-auto mt-3 max-w-[400px] text-sm leading-6 text-foreground/80">
-                  Buzz lets you bring multiple agents into the same workspace.
-                  Your team will help you get started using Buzz.
+                  {isWebBuild
+                    ? "Setting up your channels."
+                    : "Buzz lets you bring multiple agents into the same workspace. Your team will help you get started using Buzz."}
                 </p>
                 <div className="flex w-full flex-1 items-center justify-center py-6">
                   {starterPersonas.length > 0 ? (

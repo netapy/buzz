@@ -13,6 +13,7 @@ import { useIsProjectHomeChannel } from "@/features/projects/lib/projectHomeChan
 import { ProjectChannelIcon } from "@/features/projects/ui/ProjectChannelIcon";
 import type { Channel } from "@/shared/api/types";
 import { HashSearch } from "@/shared/ui/icons";
+import { isWebBuild } from "@/web/capabilities";
 
 type ChannelIntroAction = {
   description?: string;
@@ -105,7 +106,7 @@ export function useChannelIntro({
         });
       }
 
-      if (onAddAgent) {
+      if (onAddAgent && !isWebBuild) {
         actions.push({
           description: "Add an agent here.",
           icon: <Bot aria-hidden className="h-5 w-5" />,

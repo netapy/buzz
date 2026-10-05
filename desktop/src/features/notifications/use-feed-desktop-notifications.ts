@@ -25,6 +25,8 @@ import {
   slotForFeedKind,
 } from "./lib/sound";
 import type { NotificationSettings } from "./hooks";
+import { isWebBuild } from "@/web/capabilities";
+import { offerBrowserNotifications } from "@/web/notifications";
 
 const HOME_FEED_SEEN_STORAGE_KEY = "buzz-home-feed-seen.v1";
 const HOME_FEED_SEEN_MAX_ITEMS = 500;
@@ -103,10 +105,17 @@ export function useFeedDesktopNotifications(
     }
 
     hasAutoRequestedRef.current = true;
-    const result = await requestDesktopNotificationAccess();
-    if (result !== "granted") {
-      void setDesktopEnabled(false);
+    const request = async () => {
+      const result = await requestDesktopNotificationAccess();
+      if (result !== "granted") {
+        void setDesktopEnabled(false);
+      }
+    };
+    if (isWebBuild) {
+      void offerBrowserNotifications(request);
+      return;
     }
+    await request();
   });
 
   const deliverFeedNotification = React.useEffectEvent(

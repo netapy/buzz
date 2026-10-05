@@ -1,8 +1,16 @@
 {$BUZZ_DOMAIN} {
 	encode zstd gzip
 
+	# Relay surfaces that no client needs through this proxy.
+	@internal path /internal/* /operator/* /api/admin/* /api/nip-fi/* /_mesh/* /hooks/*
+	handle @internal {
+		respond 404
+	}
+
+	# The page CSP ships as a meta tag pinned to each build's inline scripts;
+	# frame-ancestors only works as a header.
 	header {
-		Content-Security-Policy "default-src 'self'; connect-src 'self' https: wss:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; style-src 'self' 'unsafe-inline'; script-src https://{$BUZZ_DOMAIN}/assets/ 'wasm-unsafe-eval' 'sha256-FEr3xzKZbTqZkS1G5nr1rbpWqGWh9+WBhZhkaU0G0gQ='; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
+		Content-Security-Policy "frame-ancestors 'none'"
 		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
 		Referrer-Policy "no-referrer"
 		Strict-Transport-Security "max-age=31536000"
@@ -27,19 +35,35 @@
 		reverse_proxy relay:3000
 	}
 
-	@web_asset file {
-		root /srv/buzz/web
-		try_files {path}
-	}
-	handle @web_asset {
+	handle /assets/* {
+		header Cache-Control "public, max-age=31536000, immutable"
 		root * /srv/buzz/web
 		file_server
 	}
 
-	@web_route header Accept *text/html*
-	handle @web_route {
+	@web_asset {
+		not path /
+		file {
+			root /srv/buzz/web
+			try_files {path}
+		}
+	}
+	handle @web_asset {
+		@revalidate path /sw.js /manifest.webmanifest
+		header @revalidate Cache-Control "no-cache"
 		root * /srv/buzz/web
-		try_files {path} /index.html
+		file_server
+	}
+
+	# Relay HTML (join policy pages) and API stay on the relay.
+	@web_route {
+		header Accept *text/html*
+		not path /api/* /media/* /.well-known/* /git/*
+	}
+	handle @web_route {
+		header Cache-Control "no-cache"
+		root * /srv/buzz/web
+		rewrite * /index.html
 		file_server
 	}
 

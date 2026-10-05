@@ -15,6 +15,7 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/shared/ui/attachment";
+import { isWebBuild } from "@/web/capabilities";
 
 type WaveMessageAttachmentProps = {
   channelId?: string | null;
@@ -81,7 +82,7 @@ export function WaveMessageAttachment({
           Start a huddle to talk to them.
         </AttachmentDescription>
       </AttachmentContent>
-      <AttachmentActions>
+      <AttachmentActions className={isWebBuild ? "hidden" : undefined}>
         <AttachmentAction
           disabled={startHuddleDisabled}
           onClick={handleStartHuddle}

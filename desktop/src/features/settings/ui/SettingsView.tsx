@@ -41,6 +41,7 @@ export {
   DEFAULT_SETTINGS_SECTION,
   type SettingsSection,
 } from "./SettingsPanels";
+import { isSettingsSectionHiddenInBrowser } from "@/web/capabilities";
 
 type SettingsViewProps = SettingsPanelProps & {
   onClose: () => void;
@@ -132,6 +133,7 @@ export function SettingsView({
   const featureState = useFeatureSnapshot();
   const visibleSections = React.useMemo(() => {
     return settingsSections.filter((s) => {
+      if (isSettingsSectionHiddenInBrowser(s.value)) return false;
       // Feature gate check. Manifest is preview-only — if the gate id is in
       // the manifest, it's preview and needs an opt-in; if it's not, it's
       // stable and renders unconditionally (fail-open).
