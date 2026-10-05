@@ -1,6 +1,16 @@
-/* Phone layout for the browser build (loaded by web/tauri.ts only). The
-   desktop shell stays untouched; below the app's 768px mobile breakpoint the
-   app becomes a full-bleed, single-pane screen with native touch metrics. */
+/* Browser build styles (loaded by web/tauri.ts only). Below the app's 768px
+   mobile breakpoint the app becomes a full-bleed, single-pane screen with
+   native touch metrics; the desktop shell keeps upstream's look. */
+
+/* The composer's 50% hairline disappears on bright browser screens; give it
+   a visible outline that firms up while typing. */
+[data-testid="message-composer"] {
+  border-color: hsl(var(--foreground) / 0.16);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+}
+[data-testid="message-composer"]:focus-within {
+  border-color: hsl(var(--foreground) / 0.28);
+}
 
 @media (max-width: 767px) {
   html,
@@ -68,8 +78,11 @@
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 7h16M4 12h16M4 17h16'/%3E%3C/svg%3E")
       center / contain no-repeat;
   }
-  /* Threads are a pushed screen with their own close button. */
-  :root:has([data-testid="message-thread-panel"])
+  /* Threads and inbox items are pushed screens with their own back button. */
+  :root:has(
+      [data-testid="message-thread-panel"],
+      [aria-label="Back to inbox list"]
+    )
     [data-testid="app-top-chrome"] {
     display: none;
   }
@@ -251,26 +264,32 @@
   }
 
   /* --- Messages: actions appear on long press ------------------------------ */
-  [data-testid="message-row"] {
+  /* Channel, thread and inbox messages alike (same rows as mobile.ts). */
+  :is(
+    [data-testid="message-row"],
+    [data-testid^="home-inbox-"][data-testid$="-message"]
+  ) {
     -webkit-touch-callout: none;
     user-select: none;
   }
-  [data-testid="message-row"] [data-testid^="message-action-bar-"] {
+  [data-testid^="message-action-bar-"] {
     opacity: 0;
     pointer-events: none;
     transition: opacity 120ms ease-out;
   }
   /* Taps leave :hover behind on touch screens; only long press highlights. */
-  [data-testid="message-row"]:hover:not([data-touch-actions]) {
+  :is(
+    [data-testid="message-row"],
+    [data-testid^="home-inbox-"][data-testid$="-message"]
+  ):hover:not([data-touch-actions]) {
     background-color: transparent;
   }
-  [data-testid="message-row"][data-touch-actions] {
+  [data-touch-actions] {
     background: hsl(var(--muted) / 0.7);
   }
   /* Float the revealed actions over the row's top edge, like desktop's
      floating placement, with thumb-sized buttons. */
-  [data-testid="message-row"][data-touch-actions]
-    [data-testid^="message-action-bar-"] {
+  [data-touch-actions] [data-testid^="message-action-bar-"] {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(-62%);
@@ -311,17 +330,29 @@
   }
   /* A solid bar instead of the desktop glass backdrop. */
   [data-testid="composer-dock-backdrop"],
-  [data-testid="channel-composer-overlay"]::before,
-  [data-testid="thread-composer-overlay"]::before {
+  :is(
+    [data-testid="channel-composer-overlay"],
+    [data-testid="thread-composer-overlay"],
+    [data-testid="home-inbox-detail-composer-overlay"]
+  )::before,
+  [data-testid="home-inbox-detail-composer-overlay"]
+    > span[aria-hidden="true"] {
     display: none;
   }
-  [data-testid="channel-composer-overlay"],
-  [data-testid="thread-composer-overlay"] {
+  :is(
+    [data-testid="channel-composer-overlay"],
+    [data-testid="thread-composer-overlay"],
+    [data-testid="home-inbox-detail-composer-overlay"]
+  ) {
     background: hsl(var(--background));
     padding-bottom: env(safe-area-inset-bottom);
   }
-  :root[data-keyboard-open] [data-testid="channel-composer-overlay"],
-  :root[data-keyboard-open] [data-testid="thread-composer-overlay"] {
+  :root[data-keyboard-open]
+    :is(
+      [data-testid="channel-composer-overlay"],
+      [data-testid="thread-composer-overlay"],
+      [data-testid="home-inbox-detail-composer-overlay"]
+    ) {
     padding-bottom: 0;
   }
 }

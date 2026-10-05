@@ -267,6 +267,8 @@ function ignoreTapHover() {
 function revealMessageActionsOnLongPress() {
   let timer = 0;
   let origin: { x: number; y: number } | null = null;
+  // A long press is not a tap: drop the click some browsers still send.
+  let swallowClick = false;
   const clear = () => {
     window.clearTimeout(timer);
     origin = null;
@@ -279,6 +281,7 @@ function revealMessageActionsOnLongPress() {
   document.addEventListener(
     "touchstart",
     (event) => {
+      swallowClick = false;
       const target = event.target as Element;
       if (
         target.closest(
@@ -286,7 +289,9 @@ function revealMessageActionsOnLongPress() {
         )
       )
         return;
-      const row = target.closest('[data-testid="message-row"]');
+      const row = target.closest(
+        '[data-testid="message-row"], [data-testid^="home-inbox-"][data-testid$="-message"]',
+      );
       activate(null);
       if (!row || !phone.matches) return;
       const point = event.touches[0];
@@ -295,9 +300,20 @@ function revealMessageActionsOnLongPress() {
         activate(row);
         navigator.vibrate?.(8);
         origin = null;
+        swallowClick = true;
       }, LONG_PRESS_MS);
     },
     { passive: true },
+  );
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    { capture: true },
   );
   document.addEventListener(
     "touchmove",
