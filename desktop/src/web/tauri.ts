@@ -11,6 +11,7 @@ import {
   getRawProfile,
   getSecretKey,
   loadIdentity,
+  nipOaOwner,
   parseCommandResponse,
   publish,
   rawChannelDetail,
@@ -29,7 +30,7 @@ import {
   submitEvent,
   tag,
 } from "./core";
-import type { CommandTable, InvokeOptions } from "./core";
+import type { CommandTable, InvokeOptions, RelayEvent } from "./core";
 import { backupCommands } from "./backup";
 import { channelInfo, chatCommands } from "./chat";
 import { mediaCommands } from "./media";
@@ -792,36 +793,93 @@ export async function invoke<T>(
     }
     case "list_relay_agents":
     case "revalidate_relay_agents": {
-      const events = await relayQuery([{ kinds: [10100], limit: 1000 }]);
+      // Desktop's trust model (relay_directory.rs): candidates are my own
+      // agents (30177) and bots on rosters I share (39002); a candidate
+      // counts only with a valid NIP-OA kind:0, and its policy comes from
+      // its owner's signed 30177. The agent's own 10100 is status only.
+      const me = getPublicKey(requireSecretKey());
       const wanted = new Set(
-        command === "revalidate_relay_agents"
-          ? ((args.pubkeys as string[] | undefined) ?? []).map((pubkey) =>
-              pubkey.toLowerCase(),
-            )
-          : [],
+        ((args.pubkeys as string[] | undefined) ?? []).map((pubkey) =>
+          pubkey.toLowerCase(),
+        ),
       );
-      return events
-        .filter(
-          (event) =>
-            wanted.size === 0 || wanted.has(event.pubkey.toLowerCase()),
-        )
-        .map((event) => {
-          const content = JSON.parse(event.content || "{}");
-          return {
-            ...content,
-            pubkey: event.pubkey,
-            owner_pubkey: content.owner_pubkey ?? content.ownerPubkey ?? null,
+      const [owned, rosters] = await Promise.all([
+        relayQuery([{ kinds: [30177], authors: [me], limit: 500 }]),
+        relayQuery([{ kinds: [39002], "#p": [me], limit: 500 }]),
+      ]);
+      const channelsOf = new Map<string, string[]>();
+      const bots = new Set<string>();
+      for (const roster of rosters)
+        for (const [name, pubkey, , role] of roster.tags) {
+          if (name !== "p" || !pubkey) continue;
+          const channelId = tag(roster, "d");
+          if (channelId)
+            channelsOf.set(pubkey, [
+              ...(channelsOf.get(pubkey) ?? []),
+              channelId,
+            ]);
+          if (role === "bot") bots.add(pubkey);
+        }
+      const candidates = [
+        ...new Set([...owned.map((event) => tag(event, "d") ?? ""), ...bots]),
+      ].filter(
+        (pubkey) =>
+          /^[0-9a-f]{64}$/.test(pubkey) &&
+          (command === "list_relay_agents" || wanted.has(pubkey)),
+      );
+      if (!candidates.length) return [] as T;
+      const [profiles, policies, statuses] = await Promise.all([
+        relayQuery([{ kinds: [0], authors: candidates }]),
+        relayQuery([{ kinds: [30177], "#d": candidates }]),
+        relayQuery([{ kinds: [10100], authors: candidates }]),
+      ]);
+      const latest = (
+        events: typeof profiles,
+        key: (e: RelayEvent) => string,
+      ) =>
+        new Map(
+          [...events]
+            .sort((a, b) => a.created_at - b.created_at)
+            .map((event) => [key(event), event]),
+        );
+      const profileOf = latest(profiles, (event) => event.pubkey);
+      const policyOf = latest(
+        policies,
+        (event) => `${event.pubkey}:${tag(event, "d")}`,
+      );
+      const statusOf = latest(statuses, (event) => event.pubkey);
+      const json = (event?: RelayEvent) => {
+        try {
+          return JSON.parse(event?.content || "{}");
+        } catch {
+          return {};
+        }
+      };
+      return candidates.flatMap((pubkey) => {
+        const profile = profileOf.get(pubkey);
+        const owner = profile ? nipOaOwner(profile) : null;
+        if (!owner) return [];
+        const meta = json(profile);
+        const policy = json(policyOf.get(`${owner}:${pubkey}`));
+        return [
+          {
+            pubkey,
+            owner_pubkey: owner,
             name:
-              content.name ??
-              content.display_name ??
-              nip19.npubEncode(event.pubkey),
-            agent_type: content.agent_type ?? "agent",
-            channels: content.channels ?? [],
-            channel_ids: content.channel_ids ?? [],
-            capabilities: content.capabilities ?? [],
-            status: content.status ?? "offline",
-          };
-        }) as T;
+              meta.display_name ||
+              meta.name ||
+              policy.name ||
+              nip19.npubEncode(pubkey),
+            agent_type: "agent",
+            channels: [],
+            channel_ids: channelsOf.get(pubkey) ?? [],
+            capabilities: [],
+            status: json(statusOf.get(pubkey)).status ?? "unknown",
+            respond_to: policy.respond_to ?? null,
+            respond_to_allowlist: policy.respond_to_allowlist ?? [],
+          },
+        ];
+      }) as T;
     }
     case "grant_approval":
     case "deny_approval": {
