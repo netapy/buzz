@@ -281,6 +281,12 @@
     background: hsl(var(--background));
     border-bottom: 1px solid hsl(var(--border) / 0.6);
   }
+  /* A setting with a switch keeps it beside its label, like iOS and
+     Android settings, instead of wrapping it under the text. */
+  div:has(> button[role="switch"]:last-child) {
+    flex-direction: row;
+    align-items: center;
+  }
   [data-testid="settings-content-surface"] {
     margin: 0;
     border-radius: 0;

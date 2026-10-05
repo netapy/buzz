@@ -22,6 +22,11 @@
 		reverse_proxy pairing:5000
 	}
 
+	# Browser push registration; relay wake delivery stays internal.
+	handle /webpush/* {
+		reverse_proxy webpush:8080
+	}
+
 	@relay_socket {
 		header Connection *Upgrade*
 		header Upgrade websocket

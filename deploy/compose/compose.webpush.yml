@@ -1,0 +1,35 @@
+# Background notifications for the browser build: the relay's push runtime
+# (NIP-PL) delivers wakes to this Web Push gateway instead of Block's APNs
+# gateway. Browsers register at /webpush/* (see Caddyfile.web); the delivery
+# endpoint stays on the internal network.
+#
+# .env: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (npx web-push generate-vapid-keys),
+# BUZZ_RELAY_PUBKEY (hex public key of BUZZ_RELAY_PRIVATE_KEY).
+services:
+  relay:
+    environment:
+      BUZZ_PUSH_ENABLED: "true"
+      BUZZ_PUSH_GATEWAY_DELIVERY_URL: http://webpush:8080/v1/deliveries/apns
+
+  webpush:
+    build: ${BUZZ_WEBPUSH_DIR:-./webpush}
+    environment:
+      BUZZ_RELAY_PUBKEY: ${BUZZ_RELAY_PUBKEY:?set BUZZ_RELAY_PUBKEY}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?set VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?set VAPID_PRIVATE_KEY}
+      WEBPUSH_DELIVERY_URL: http://webpush:8080/v1/deliveries/apns
+      WEBPUSH_PUBLIC_ORIGIN: ${BUZZ_DOMAIN:?set BUZZ_DOMAIN}
+      WEBPUSH_ALLOWED_HOSTS: ${WEBPUSH_ALLOWED_HOSTS:-}
+    volumes:
+      - buzz-webpush-data:/data
+    restart: unless-stopped
+    networks:
+      - buzz-net
+
+  caddy:
+    depends_on:
+      webpush:
+        condition: service_started
+
+volumes:
+  buzz-webpush-data:

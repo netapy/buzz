@@ -24,6 +24,7 @@ import {
 } from "./SettingsOptionGroup";
 import { SettingsSectionHeader } from "./SettingsSectionHeader";
 import { SoundPicker } from "./SoundPicker";
+import { isWebBuild } from "@/web/capabilities";
 
 export function NotificationSettingsCard({
   isUpdatingDesktopNotifications,
@@ -67,7 +68,11 @@ export function NotificationSettingsCard({
     <section className="min-w-0" data-testid="settings-notifications">
       <SettingsSectionHeader
         title="Notifications"
-        description="Desktop alerts are on by default. Fine-tune what gets through below."
+        description={
+          isWebBuild
+            ? "Choose what reaches this device, even when Buzz is closed."
+            : "Desktop alerts are on by default. Fine-tune what gets through below."
+        }
       />
 
       <span className="sr-only" data-testid="notifications-desktop-state">
@@ -81,7 +86,7 @@ export function NotificationSettingsCard({
       </span>
 
       <SettingsOptionGroupList>
-        <SettingsOptionGroup title="Desktop">
+        <SettingsOptionGroup title={isWebBuild ? "This device" : "Desktop"}>
           <SettingsOptionRow>
             <div className="min-w-0">
               <label
@@ -90,15 +95,19 @@ export function NotificationSettingsCard({
               >
                 {isUpdatingDesktopNotifications
                   ? "Requesting..."
-                  : "Desktop alerts"}
+                  : isWebBuild
+                    ? "Notifications"
+                    : "Desktop alerts"}
               </label>
               <p
                 className="text-sm font-normal text-muted-foreground/70"
                 data-settings-subcopy
               >
-                {notificationSettings.desktopEnabled
-                  ? "Native desktop alerts are enabled for the categories you have armed below."
-                  : "Request OS permission and surface new mentions or needs-action items outside the app."}
+                {isWebBuild
+                  ? "Mentions, direct messages and replies to your threads."
+                  : notificationSettings.desktopEnabled
+                    ? "Native desktop alerts are enabled for the categories you have armed below."
+                    : "Request OS permission and surface new mentions or needs-action items outside the app."}
               </p>
             </div>
             <Switch
@@ -289,9 +298,13 @@ export function NotificationSettingsCard({
 
       {permissionBlocked && (
         <p className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {notificationPermission === "unsupported"
-            ? "Desktop notifications are not supported in this environment."
-            : "Desktop notifications are blocked. Enable them in your system settings."}
+          {isWebBuild
+            ? notificationPermission === "unsupported"
+              ? "Add Buzz to your Home Screen to get notifications on iPhone."
+              : "Notifications are blocked for Buzz. Allow them in your browser or phone settings."
+            : notificationPermission === "unsupported"
+              ? "Desktop notifications are not supported in this environment."
+              : "Desktop notifications are blocked. Enable them in your system settings."}
         </p>
       )}
 

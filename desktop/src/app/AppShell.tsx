@@ -106,6 +106,8 @@ import { AppShellTrayMenu } from "@/app/useAppShellTrayMenu";
 import { AppProfilePanelProvider } from "@/app/AppProfilePanelProvider";
 import { AppWorkflowEditorOverlayProvider } from "@/app/AppWorkflowEditorOverlayProvider";
 import { LazySettingsScreen } from "@/app/LazySettingsScreen";
+import { isWebBuild } from "@/web/capabilities";
+import NotificationPrompt from "@/web/NotificationPrompt";
 const EMPTY_CHANNELS: Channel[] = [];
 export function AppShell() {
   useWebviewZoomShortcuts();
@@ -993,6 +995,12 @@ export function AppShell() {
                     open={isSendFeedbackOpen}
                   />
                   {!isHuddleRoom ? <ProtectedGlobalOverlay /> : null}
+                  {isWebBuild ? (
+                    <NotificationPrompt
+                      enabled={notificationSettings.settings.desktopEnabled}
+                      onEnable={notificationSettings.setDesktopEnabled}
+                    />
+                  ) : null}
                 </AppWorkflowEditorOverlayProvider>
               </AppProfilePanelProvider>
             </SidebarProvider>

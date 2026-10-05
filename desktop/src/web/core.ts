@@ -45,24 +45,26 @@ export function buffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer as ArrayBuffer;
 }
 
-export function openVault(): Promise<IDBDatabase> {
+function openStore(name: string, store: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(VAULT_DATABASE, 1);
+    const request = indexedDB.open(name, 1);
     request.onupgradeneeded = () =>
-      request.result.createObjectStore(VAULT_STORE, { keyPath: "id" });
+      request.result.createObjectStore(store, { keyPath: "id" });
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function withVault<T>(
+async function withStore<T>(
+  name: string,
+  store: string,
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
-  const database = await openVault();
+  const database = await openStore(name, store);
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(VAULT_STORE, mode);
-    const request = operation(transaction.objectStore(VAULT_STORE));
+    const transaction = database.transaction(store, mode);
+    const request = operation(transaction.objectStore(store));
     let result: T;
     request.onsuccess = () => {
       result = request.result;
@@ -77,6 +79,38 @@ export async function withVault<T>(
     };
     transaction.onabort = transaction.onerror;
   });
+}
+
+export function withVault<T>(
+  mode: IDBTransactionMode,
+  operation: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  return withStore(VAULT_DATABASE, VAULT_STORE, mode, operation);
+}
+
+// What the service worker needs to turn a push wake into notifications:
+// where to query, the lease filters that woke it, names for titles, and
+// what it already showed.
+export type PushContext = {
+  id: "current";
+  pubkey: string;
+  relay: string;
+  filters: Record<string, unknown>[];
+  channels: Record<string, { name: string; dm: boolean }>;
+  lastSeen?: number;
+  notified?: string[];
+};
+
+export function readPushContext(): Promise<PushContext | undefined> {
+  return withStore("buzz-desktop-web-push", "context", "readonly", (store) =>
+    store.get("current"),
+  );
+}
+
+export function writePushContext(context: PushContext): Promise<unknown> {
+  return withStore("buzz-desktop-web-push", "context", "readwrite", (store) =>
+    store.put(context),
+  );
 }
 
 export async function loadIdentity(): Promise<Uint8Array | null> {

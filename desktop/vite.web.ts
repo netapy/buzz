@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { Plugin } from "vite";
+import { build, type Plugin } from "vite";
 
 // Browser (PWA) build: route every Tauri import to the shim and give the
 // shell its installable-app metadata and a CSP pinned to the inline scripts
@@ -56,6 +56,26 @@ export function buzzWeb(): Plugin {
         ),
       },
     }),
+    // The service worker is a classic script at the site root (iOS needs no
+    // module workers), so it gets its own self-contained IIFE build.
+    closeBundle: async () => {
+      await build({
+        configFile: false,
+        logLevel: "warn",
+        resolve: { alias: { "@": path.resolve(__dirname, "src") } },
+        build: {
+          copyPublicDir: false,
+          emptyOutDir: false,
+          outDir: path.resolve(__dirname, "dist"),
+          lib: {
+            entry: path.resolve(__dirname, "src/web/sw.ts"),
+            fileName: () => "sw.js",
+            formats: ["iife"],
+            name: "buzzServiceWorker",
+          },
+        },
+      });
+    },
     transformIndexHtml: {
       order: "post",
       handler: (html) =>
