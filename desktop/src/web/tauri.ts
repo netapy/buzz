@@ -1023,7 +1023,7 @@ export async function homeDir(): Promise<string> {
 }
 
 export async function getVersion(): Promise<string> {
-  return "web";
+  return `${import.meta.env?.BUZZ_APP_VERSION ?? "0"} (web)`;
 }
 
 export async function check(): Promise<null> {

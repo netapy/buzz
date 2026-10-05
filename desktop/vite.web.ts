@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 
@@ -45,6 +46,16 @@ export function buzzWeb(): Plugin {
     name: "buzz-web",
     enforce: "pre",
     resolveId: (source) => (TAURI_MODULE.test(source) ? shim : null),
+    // The shim's getVersion reports the app version this build ships.
+    config: () => ({
+      define: {
+        "import.meta.env.BUZZ_APP_VERSION": JSON.stringify(
+          JSON.parse(
+            readFileSync(path.resolve(__dirname, "package.json"), "utf8"),
+          ).version,
+        ),
+      },
+    }),
     transformIndexHtml: {
       order: "post",
       handler: (html) =>

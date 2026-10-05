@@ -12,6 +12,12 @@
   border-color: hsl(var(--foreground) / 0.28);
 }
 
+/* The profile hero avatar is drawn without a backdrop for photos; initials
+   need their disc or they float on the page. */
+[data-testid="user-profile-avatar"]:not(:has(img)) {
+  background-color: hsl(var(--primary) / 0.2);
+}
+
 /* A calm boot splash: the bee on the theme background, no gradient wash. */
 .buzz-setup-loading-shell {
   background: hsl(var(--background));
@@ -86,9 +92,11 @@
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 7h16M4 12h16M4 17h16'/%3E%3C/svg%3E")
       center / contain no-repeat;
   }
-  /* Threads and inbox items are pushed screens with their own back button. */
+  /* Side panels (thread, profile, channel settings…) and inbox items are
+     pushed screens with their own back or close button. */
   :root:has(
-      [data-testid="message-thread-panel"],
+      main aside,
+      [data-testid="channel-management-sheet"],
       [aria-label="Back to inbox list"]
     )
     [data-testid="app-top-chrome"] {
@@ -98,8 +106,14 @@
   [data-testid="channel-shared-header-backdrop"] {
     min-height: 3.5rem;
   }
-  [data-testid="chat-header"] {
-    padding-left: 2.75rem;
+  /* Clear the 44px drawer button and its inset. */
+  [data-testid="chat-header"],
+  [data-testid="new-message-header"] {
+    padding-left: 3.25rem;
+  }
+  /* Tooltips are a pointer affordance; on touch they stick after a tap. */
+  [data-radix-popper-content-wrapper]:has([role="tooltip"]) {
+    display: none;
   }
   [data-testid="inbox-filter-trigger"] {
     margin-left: 2.5rem;
@@ -258,7 +272,9 @@
   }
 
   /* --- Settings: a list screen pushing full-bleed section screens --------- */
-  [data-testid="settings-sidebar-top-chrome"] {
+  /* Keyboard shortcuts mean nothing without a keyboard. */
+  [data-testid="settings-sidebar-top-chrome"],
+  li:has(> [data-testid="settings-nav-shortcuts"]) {
     display: none;
   }
   [data-testid="settings-mobile-back"] {
@@ -269,6 +285,11 @@
     margin: 0;
     border-radius: 0;
     box-shadow: none;
+  }
+
+  /* The emoji picker fits above the message instead of running off screen. */
+  em-emoji-picker {
+    height: min(22rem, 50dvh);
   }
 
   /* --- Messages: actions appear on long press ------------------------------ */
