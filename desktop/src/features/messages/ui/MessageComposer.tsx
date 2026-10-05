@@ -67,6 +67,7 @@ import { useComposerLinkPreviews } from "./useComposerLinkPreviews";
 import { useAddressedAgentMentionRestore } from "./useAddressedAgentMentionRestore";
 import { scheduleSettleGatedAutoSubmit } from "./messageComposerAutoSubmit";
 import type { MessageComposerProps } from "./MessageComposer.types";
+import { isWebBuild } from "@/web/capabilities";
 function MessageComposerImpl({
   audienceContext = null,
   channelId = null,
@@ -280,7 +281,9 @@ function MessageComposerImpl({
         : `Message #${channelName}`));
   const richText = useRichTextEditor({
     placeholder: computedPlaceholder,
-    editable: !composerDisabled,
+    // In browsers a disabled editor loses focus, which drops a phone's
+    // keyboard after every send; sends already cope with typing meanwhile.
+    editable: !composerDisabled || (isWebBuild && isSending),
     mentionNames: mentions.knownNames,
     agentMentionNames: mentions.agentKnownNames,
     channelNames: channelLinks.knownChannelNames,

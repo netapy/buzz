@@ -212,6 +212,24 @@
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
   }
+  /* Native drawer motion: a quick decelerating slide over a plain scrim
+     (a full-screen backdrop blur stutters on phone GPUs). Dragging is
+     handled in mobile.ts. */
+  [data-sidebar="sidebar"][data-mobile="true"],
+  div:has(+ [data-sidebar="sidebar"][data-mobile="true"]) {
+    --tw-animation-duration: 260ms;
+    --tw-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-sidebar="sidebar"][data-mobile="true"][data-state="closed"],
+  div:has(+ [data-sidebar="sidebar"][data-mobile="true"][data-state="closed"]) {
+    --tw-animation-duration: 200ms;
+  }
+  div:has(+ [data-sidebar="sidebar"][data-mobile="true"]) {
+    background-color: rgb(0 0 0 / 0.32);
+  }
+  .backdrop-blur-\[5px\] {
+    backdrop-filter: none;
+  }
   [data-mobile="true"] [data-sidebar="menu-button"],
   [data-testid="settings-sidebar"] [data-sidebar="menu-button"] {
     min-height: 2.75rem;
