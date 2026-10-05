@@ -1907,6 +1907,9 @@ export async function invoke<T>(
     case "set_prevent_sleep_active":
     case "set_window_vibrancy":
     case "relay_reconnect_hook":
+    // Agent avatar trust and deep-link queues are native-only state.
+    case "set_agent_avatar_communities":
+    case "clear_pending_navigation_deep_links":
       return undefined as T;
     case "relay_reconnect_hook_configured":
       return false as T;
