@@ -291,7 +291,7 @@ export function QrSignInButton(props: {
 
 export function PhoneQrHint() {
   return (
-    <p className="mt-3 text-center text-sm text-foreground/70">
+    <p className="mt-3 text-sm text-foreground/70">
       On your phone, open Buzz, then Settings → Send identity to desktop.
     </p>
   );
