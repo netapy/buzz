@@ -1,3 +1,4 @@
+import { isRelayRemovedError } from "@/features/agents/managedAgentRelayCleanup";
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
@@ -6,6 +7,7 @@ import { toast } from "sonner";
 
 import {
   agentConfigSurfaceQueryKey,
+  useAcpCommandsQuery,
   useAcpRuntimesQuery,
   useAgentConfigSurface,
   useBakedBuildEnvKeysQuery,
@@ -116,13 +118,12 @@ export function AgentInstanceEditDialog({
   const updateMutation = useUpdateManagedAgentMutation();
   const startMutation = useStartManagedAgentMutation();
   const queryClient = useQueryClient();
-  // Spans the COMPLETE Save sequence (locked update + standalone setters).
-  // Every gate must key off this, not updateMutation.isPending alone.
+  // Gate the full Save sequence, including standalone setters, with isSaving.
   const [isSaving, setIsSaving] = React.useState(false);
-  // Surfaces a standalone-setter failure (auto-restart or effort) that React
-  // Query does not track — keeps the dialog open so the user can retry Save.
+  // Keep standalone-setter failures visible so the user can retry Save.
   const [setterError, setSetterError] = React.useState<Error | null>(null);
   const runtimesQuery = useAcpRuntimesQuery({ enabled: open });
+  const acpCommandsQuery = useAcpCommandsQuery({ enabled: open });
   const configSurfaceQuery = useAgentConfigSurface(open ? agent.pubkey : null);
   const runtimes = runtimesQuery.data ?? [];
 
@@ -808,10 +809,9 @@ export function AgentInstanceEditDialog({
               startMutation.mutate(result.agent.pubkey, {
                 onSuccess: () => toast.success(`${startedName} started.`),
                 onError: (error) =>
+                  isRelayRemovedError(error) ||
                   toast.error(
-                    error instanceof Error
-                      ? `${startedName} failed to start: ${error.message}`
-                      : `${startedName} failed to start.`,
+                    `${startedName} failed to start${error instanceof Error ? `: ${error.message}` : "."}`,
                   ),
               });
             },
@@ -1133,7 +1133,6 @@ export function AgentInstanceEditDialog({
               inheritedModel={inheritedModelDefault}
               inheritedProvider={inheritedProviderDefault}
             />
-
             <AgentDefaultsDialog
               onOpenChange={setAiDefaultsOpen}
               open={aiDefaultsOpen}
@@ -1174,6 +1173,7 @@ export function AgentInstanceEditDialog({
                   >
                     <EditAgentAdvancedFields
                       acpCommand={acpCommand}
+                      acpCommandCandidates={acpCommandsQuery.data ?? []}
                       agentArgs={agentArgs}
                       autoRestartOnConfigChange={autoRestartOnConfigChange}
                       disabled={isSaving}

@@ -10,6 +10,7 @@ use crate::managed_agents::{
 };
 mod auth_status_cache;
 mod bounded_command;
+pub(crate) mod command_search;
 mod login_shell;
 mod presets;
 mod runtime_metadata;
@@ -60,6 +61,7 @@ fn common_binary_paths() -> &'static [PathBuf] {
                 home.join(".volta/bin"),
                 home.join(".asdf/shims"),
                 home.join(".bun/bin"),
+                home.join(".kimi-code/bin"),
             ]);
         }
         // Windows well-known dirs for npm global shims and standalone installer targets.
@@ -421,8 +423,7 @@ fn resolve_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String
 }
 
 /// Resolve a command to an absolute path, caching results for the app lifetime.
-/// The cache eliminates redundant login-shell spawns when multiple agents share
-/// the same binaries (e.g. `npx`, `uvx`).
+/// The cache eliminates redundant login-shell spawns when multiple agents share binaries.
 pub fn resolve_command(command: &str) -> Option<PathBuf> {
     if let Some(managed) = resolve_buzz_managed_command(command) {
         return Some(managed);

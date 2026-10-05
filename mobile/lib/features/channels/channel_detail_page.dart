@@ -11,9 +11,10 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
-import '../../shared/animated_avatar.dart';
 import '../../shared/emoji/emoji_burst.dart';
 import '../../shared/huddle/huddle.dart';
+import '../../shared/identity_names/identity_names.dart';
+import '../../shared/identity_names/identity_names_provider.dart';
 import '../../shared/mentions/agent_identity_provider.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
@@ -25,10 +26,8 @@ import '../../shared/widgets/frosted_app_bar.dart';
 import '../../shared/widgets/frosted_scaffold.dart';
 import '../../shared/widgets/flapping_bee.dart';
 import '../../shared/widgets/keyboard_dismiss_on_drag.dart';
-import '../../shared/widgets/ios_glass_navigation_button.dart';
-import '../../shared/widgets/masked_avatar_badge.dart';
+import '../../shared/widgets/load_error_view.dart';
 import '../../shared/widgets/message_author_meta.dart';
-import '../../shared/widgets/modal_presentation.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../profile/presence_cache_provider.dart';
 import '../profile/profile_provider.dart';
@@ -38,8 +37,9 @@ import '../forum/forum_posts_view.dart';
 import 'android_ime_lift.dart';
 import 'channel.dart';
 import 'channel_actions_sheet.dart';
+import 'channel_identity_names_provider.dart';
+import 'channel_member_profile_actions.dart';
 import 'channel_link_navigation.dart';
-import 'agent_activity/working_bots_provider.dart';
 import 'channel_management_provider.dart';
 import 'channel_sections/channel_sections_provider.dart';
 import 'channel_messages_provider.dart';
@@ -60,7 +60,6 @@ import 'jump_to_latest_switcher.dart';
 import 'local_message_send_animation_provider.dart';
 import 'local_message_send_transition.dart';
 import 'mobile_huddle_controller.dart';
-import 'members_sheet.dart';
 import 'message_actions.dart';
 import 'message_action_backdrop_state.dart';
 import 'message_long_press_region.dart';
@@ -76,6 +75,7 @@ import '../profile/user_profile_sheet.dart';
 import 'small_avatar.dart';
 import 'sticky_date_header.dart';
 import 'thread_detail_page.dart';
+import 'thread_replies_provider.dart';
 import 'timeline_message.dart';
 
 part 'channel_detail_page/message_list.dart';
@@ -514,13 +514,8 @@ class ChannelDetailPage extends HookConsumerWidget {
         !resolvedChannel.isForum &&
         isConnectionInProgress &&
         !messagesNotifier.hasLoadedMessages;
-    final appBarTitleContentHeight = _twoLineAppBarTitleContentHeight(
-      context,
-      isDm: resolvedChannel.isDm,
-    );
-    final usesNativeIosGlassBackButton =
-        Navigator.canPop(context) &&
-        Theme.of(context).platform == TargetPlatform.iOS;
+    final appBarTitleContentHeight = _twoLineAppBarTitleContentHeight(context);
+
     final readTimestamp = _channelReadTimestamp(
       channel: resolvedChannel,
       messagesState: messagesState,
@@ -568,100 +563,90 @@ class ChannelDetailPage extends HookConsumerWidget {
       });
     }, [channel.id, readState.isReady, readTimestamp]);
 
+    final dmHeader = resolvedChannel.isDm
+        ? _watchDmHeader(ref, resolvedChannel, currentPubkey)
+        : null;
+    final headerMembers = ref.watch(channelMembersProvider(resolvedChannel.id));
+    final headerMemberCount =
+        headerMembers.value?.length ?? resolvedChannel.memberCount;
+    final headerMemberLabel =
+        '$headerMemberCount ${headerMemberCount == 1 ? 'member' : 'members'}';
+    Future<void> openChannelDetails() async {
+      final shouldClose = await showChannelDetailsPage(
+        context: context,
+        channel: resolvedChannel,
+        currentPubkey: currentPubkey,
+        onMemberTap: (context, pubkey) => showUserProfileSheet(
+          context,
+          pubkey,
+          names: channelIdentityNamesProvider(resolvedChannel.id),
+          contextualActions: (_) => ChannelMemberProfileActions(
+            channel: resolvedChannel,
+            pubkey: pubkey,
+          ),
+        ),
+        sectionId: ref
+            .read(channelSectionsProvider)
+            .store
+            .assignments[resolvedChannel.id],
+      );
+      if (shouldClose == true && context.mounted) {
+        Navigator.of(context).pop();
+      }
+    }
+
     return FrostedScaffold(
       resizeToAvoidBottomInset:
           !usesFixedAndroidImeViewport || resolvedChannel.isForum,
       appBar: FrostedAppBar(
-        leading: usesNativeIosGlassBackButton
-            ? IosGlassNavigationButton(
-                key: const ValueKey('channel-ios-glass-back'),
-                icon: IosGlassNavigationIcon.back,
-                semanticLabel: 'Back',
-                onPressed: () => Navigator.of(context).maybePop(),
-                width: iosGlassChannelHeaderLeadingWidth,
-                buttonCenterX: iosGlassChannelHeaderButtonCenterX,
-                nativeViewSuppressed: messageActionBackdropActive,
-              )
-            : null,
+        alwaysFrosted: true,
+        nativeViewSuppressed: messageActionBackdropActive,
+        nativeEphemeralLabel: ephemeralChannelDisplay(
+          resolvedChannel,
+        )?.tooltipLabel,
+        nativeTitle:
+            dmHeader?.label ??
+            resolveDmChannelDisplayLabel(
+              resolvedChannel,
+              currentPubkey: currentPubkey,
+            ),
+        nativeSubtitle: isOneToOneDm
+            ? dmHeader?.presenceLabel
+            : headerMemberLabel,
+        nativeTitlePresenceColor: switch (isOneToOneDm
+            ? dmHeader?.presence
+            : null) {
+          'online' => context.appColors.success,
+          'away' => context.appColors.warning,
+          'offline' => context.colors.outline,
+          _ => null,
+        },
+        onNativeTitlePressed: openChannelDetails,
+        nativeActions: [
+          if (resolvedChannel.isDm ? showsHuddleAction : showsComposer)
+            _huddleNavigationAction(context, ref, resolvedChannel, [
+              ...messagesState.value ?? const [],
+              ...huddleLifecycle,
+            ]),
+        ],
         iconColor: context.colors.primary,
         titleContentHeight: appBarTitleContentHeight,
         titleStyle: channelTitleTextStyle,
-        title: Padding(
-          padding: EdgeInsets.only(
-            left: usesNativeIosGlassBackButton
-                ? iosGlassChannelHeaderTitleSpacing
-                : 0,
-          ),
-          child: resolvedChannel.isDm
-              ? _DmAppBarTitle(
-                  channel: resolvedChannel,
-                  currentPubkey: currentPubkey,
-                )
-              : _ChannelAppBarTitle(
-                  channel: resolvedChannel,
-                  onTap: () async {
-                    final shouldClose = await showChannelDetailsPage(
-                      context: context,
-                      channel: resolvedChannel,
-                      currentPubkey: currentPubkey,
-                      onMemberTap: showUserProfileSheet,
-                      sectionId: ref
-                          .read(channelSectionsProvider)
-                          .store
-                          .assignments[resolvedChannel.id],
-                    );
-                    if (shouldClose == true && context.mounted) {
-                      Navigator.of(context).pop();
-                    }
-                  },
-                ),
+        centerTitle: true,
+        title: _ConversationAppBarTitle(
+          channel: resolvedChannel,
+          label: dmHeader?.label ?? resolvedChannel.name,
+          subtitle: isOneToOneDm ? dmHeader!.presenceLabel : headerMemberLabel,
+          presence: isOneToOneDm ? dmHeader?.presence : null,
+          onTap: openChannelDetails,
         ),
-        actions: resolvedChannel.isDm
-            ? [
-                if (showsHuddleAction)
-                  _HuddleButton(
-                    channel: resolvedChannel,
-                    events: [
-                      ...messagesState.value ?? const [],
-                      ...huddleLifecycle,
-                    ],
-                  ),
-                if (_showsMembersAction(resolvedChannel))
-                  _MembersButton(
-                    channelId: resolvedChannel.id,
-                    channel: resolvedChannel,
-                    currentPubkey: currentPubkey,
-                  ),
-                IconButton(
-                  color: context.colors.primary,
-                  onPressed: () async {
-                    final shouldClose = await showChannelActionsSheet(
-                      context: context,
-                      channel: resolvedChannel,
-                      isUnread: false,
-                      sectionId: ref
-                          .read(channelSectionsProvider)
-                          .store
-                          .assignments[resolvedChannel.id],
-                    );
-                    if (shouldClose == true && context.mounted) {
-                      Navigator.of(context).pop();
-                    }
-                  },
-                  tooltip: 'Channel actions',
-                  icon: const Icon(LucideIcons.ellipsisVertical, size: 22),
-                ),
-              ]
-            : [
-                if (showsComposer)
-                  _HuddleButton(
-                    channel: resolvedChannel,
-                    events: [
-                      ...messagesState.value ?? const [],
-                      ...huddleLifecycle,
-                    ],
-                  ),
-              ],
+        actions: [
+          if (resolvedChannel.isDm ? showsHuddleAction : showsComposer)
+            _HuddleButton(
+              channel: resolvedChannel,
+              events: [...messagesState.value ?? const [], ...huddleLifecycle],
+            ),
+        ],
       ),
       body: Stack(
         fit: StackFit.expand,
@@ -714,12 +699,10 @@ class ChannelDetailPage extends HookConsumerWidget {
                                 titleContentHeight: appBarTitleContentHeight,
                               ),
                             ),
-                            child: Center(
-                              child: Text(
-                                'Failed to load messages',
-                                style: context.textTheme.bodyMedium?.copyWith(
-                                  color: context.colors.error,
-                                ),
+                            child: LoadErrorView(
+                              message: 'Failed to load messages',
+                              onRetry: () => ref.invalidate(
+                                channelMessagesProvider(channel.id),
                               ),
                             ),
                           ),
@@ -788,7 +771,10 @@ class ChannelDetailPage extends HookConsumerWidget {
                   alignment: Alignment.bottomCenter,
                   child: typingEntries.isEmpty
                       ? const SizedBox.shrink()
-                      : ChannelTypingIndicator(entries: typingEntries),
+                      : ChannelTypingIndicator(
+                          channelId: resolvedChannel.id,
+                          entries: typingEntries,
+                        ),
                 ),
                 if (!resolvedChannel.isDm)
                   _ReadOnlyNotice(channel: resolvedChannel),
@@ -816,7 +802,10 @@ class ChannelDetailPage extends HookConsumerWidget {
                         alignment: Alignment.bottomCenter,
                         child: typingEntries.isEmpty
                             ? const SizedBox.shrink()
-                            : ChannelTypingIndicator(entries: typingEntries),
+                            : ChannelTypingIndicator(
+                                channelId: resolvedChannel.id,
+                                entries: typingEntries,
+                              ),
                       ),
                       ComposeBar(
                         channelId: channel.id,
