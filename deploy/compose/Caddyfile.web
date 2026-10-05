@@ -35,12 +35,6 @@
 		reverse_proxy relay:3000
 	}
 
-	handle /assets/* {
-		header Cache-Control "public, max-age=31536000, immutable"
-		root * /srv/buzz/web
-		file_server
-	}
-
 	@web_asset {
 		not path /
 		file {
@@ -51,6 +45,10 @@
 	handle @web_asset {
 		@revalidate path /sw.js /manifest.webmanifest
 		header @revalidate Cache-Control "no-cache"
+		# Content-hashed build output; only existing files, so a missing
+		# chunk is never cached as immutable.
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
 		root * /srv/buzz/web
 		file_server
 	}
