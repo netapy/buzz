@@ -4,7 +4,7 @@ import test from "node:test";
 import { generateSecretKey } from "nostr-tools";
 
 globalThis.location = new URL("https://buzz.test/");
-const { setIdentity } = await import("./core.ts");
+const { setIdentity, stripEncoderMetadata } = await import("./core.ts");
 const { listen } = await import("./events.ts");
 const { mediaCommands, rawUploadBody, rawUploadHeader, sanitizeFilename } =
   await import("./media.ts");
@@ -214,4 +214,98 @@ test("fetch_media_bytes sends Blossom GET auth and maps cancellation", async () 
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("stripEncoderMetadata drops what canvas encoders add and the relay rejects", () => {
+  const bytes = (...parts) =>
+    Uint8Array.from(
+      parts.flatMap((p) =>
+        typeof p === "string" ? [...p].map((c) => c.charCodeAt(0)) : p,
+      ),
+    );
+  const be32 = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const le32 = (n) => be32(n).reverse();
+  const png = (kind, data = []) => [
+    ...be32(data.length),
+    ...bytes(kind),
+    ...data,
+    0,
+    0,
+    0,
+    0,
+  ];
+  const pngChunks = (data) => {
+    const kinds = [];
+    for (
+      let i = 8;
+      i < data.length;
+      i += 12 + new DataView(data.buffer).getUint32(i)
+    )
+      kinds.push(String.fromCharCode(...data.subarray(i + 4, i + 8)));
+    return kinds;
+  };
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const pngIn = bytes(
+    signature,
+    png("IHDR", Array(13).fill(0)),
+    png("sRGB", [0]),
+    png("eXIf", [1, 2]),
+    png("iCCP", [3]),
+    png("pHYs", Array(9).fill(0)),
+    png("IDAT", [4, 5]),
+    png("IEND"),
+  );
+  assert.deepEqual(pngChunks(stripEncoderMetadata(pngIn, "image/png")), [
+    "IHDR",
+    "sRGB",
+    "IDAT",
+    "IEND",
+  ]);
+
+  const segment = (marker, payload) => [
+    0xff,
+    marker,
+    (payload.length + 2) >> 8,
+    (payload.length + 2) & 255,
+    ...payload,
+  ];
+  const jfif = [...bytes("JFIF\0"), 1, 1, 0, 0, 1, 0, 1, 0, 0];
+  const scan = [0xff, 0xda, 0, 2, 9, 9, 0xff, 0xd9];
+  const jpegIn = bytes(
+    [0xff, 0xd8],
+    segment(0xe0, jfif),
+    segment(0xe1, bytes("Exif\0\0")),
+    segment(0xe2, bytes("ICC_PROFILE\0")),
+    segment(0xfe, bytes("hi")),
+    segment(0xdb, [0, 1]),
+    scan,
+  );
+  assert.deepEqual(
+    stripEncoderMetadata(jpegIn, "image/jpeg"),
+    bytes([0xff, 0xd8], segment(0xe0, jfif), segment(0xdb, [0, 1]), scan),
+  );
+
+  const riff = (chunks) =>
+    bytes("RIFF", le32(4 + chunks.length), "WEBP", chunks);
+  const vp8x = (flags) => [
+    ...bytes("VP8X"),
+    ...le32(10),
+    flags,
+    ...Array(9).fill(0),
+  ];
+  const vp8 = [...bytes("VP8 "), ...le32(2), 7, 7];
+  const webpIn = riff([
+    ...vp8x(0x20 | 0x10),
+    ...bytes("ICCP"),
+    ...le32(3),
+    1,
+    2,
+    3,
+    0,
+    ...vp8,
+  ]);
+  assert.deepEqual(
+    stripEncoderMetadata(webpIn, "image/webp"),
+    riff([...vp8x(0x10), ...vp8]),
+  );
 });

@@ -510,6 +510,76 @@ export function imageNeedsOriginal(
   return offset !== data.length;
 }
 
+// Ancillary PNG chunks the relay accepts (buzz-media validation.rs).
+const PNG_RENDERING_CHUNKS = new Set(
+  "cHRM gAMA sBIT sRGB bKGD hIST tRNS sPLT acTL fcTL fdAT".split(" "),
+);
+
+// Canvas encoders tag their output with a colour profile or EXIF (Chromium:
+// JPEG APP2 and WebP ICCP; WebKit: PNG eXIf and JPEG APP1), which the relay
+// rejects as metadata. Canvas pixels are already sRGB and upright, so those
+// segments carry nothing the image needs.
+export function stripEncoderMetadata(data: Uint8Array, type: string) {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const kept: Uint8Array[] = [];
+  if (type === "image/png") {
+    kept.push(data.subarray(0, 8));
+    for (let offset = 8; offset + 12 <= data.length; ) {
+      const end = offset + 12 + view.getUint32(offset);
+      const kind = ascii(data, offset + 4, 4);
+      if (!(kind.charCodeAt(0) & 0x20) || PNG_RENDERING_CHUNKS.has(kind))
+        kept.push(data.subarray(offset, end));
+      offset = end;
+    }
+  } else if (type === "image/jpeg") {
+    // Header segments up to the scan; APP14 (Adobe colour transform) stays.
+    let offset = 2;
+    kept.push(data.subarray(0, 2));
+    while (
+      offset + 4 <= data.length &&
+      data[offset] === 0xff &&
+      data[offset + 1] !== 0xda
+    ) {
+      const marker = data[offset + 1] ?? 0;
+      const end = offset + 2 + view.getUint16(offset + 2);
+      if (
+        !(
+          (marker >= 0xe1 && marker <= 0xef && marker !== 0xee) ||
+          marker === 0xfe
+        )
+      )
+        kept.push(data.subarray(offset, end));
+      offset = end;
+    }
+    kept.push(data.subarray(offset));
+  } else if (type === "image/webp") {
+    kept.push(data.slice(0, 12));
+    for (let offset = 12; offset + 8 <= data.length; ) {
+      const length = view.getUint32(offset + 4, true);
+      const end = offset + 8 + length + (length & 1);
+      const kind = ascii(data, offset, 4);
+      if (kind === "VP8X") {
+        const chunk = data.slice(offset, end);
+        chunk[8] = (chunk[8] ?? 0) & ~(0x20 | 0x08 | 0x04); // ICC, EXIF, XMP
+        kept.push(chunk);
+      } else if (kind !== "ICCP" && kind !== "EXIF" && kind !== "XMP ")
+        kept.push(data.subarray(offset, end));
+      offset = end;
+    }
+  } else return data;
+  const out = new Uint8Array(
+    kept.reduce((size, part) => size + part.length, 0),
+  );
+  let at = 0;
+  for (const part of kept) {
+    out.set(part, at);
+    at += part.length;
+  }
+  if (type === "image/webp")
+    new DataView(out.buffer).setUint32(4, out.length - 8, true);
+  return out;
+}
+
 export function blossomAuth(verb: "get" | "upload", hash?: string) {
   const now = Math.floor(Date.now() / 1000);
   const tags = [
@@ -560,9 +630,14 @@ export async function prepareImageForUpload(
     );
     if (!blob) throw new Error("Unable to clean image.");
     if (blob.size > 50 * 1024 * 1024) throw new Error("Image is too large.");
+    // WebKit has no WebP encoder and answers PNG.
+    const encoded = blob.type || type;
     return {
-      data: new Uint8Array(await blob.arrayBuffer()),
-      type: blob.type || type,
+      data: stripEncoderMetadata(
+        new Uint8Array(await blob.arrayBuffer()),
+        encoded,
+      ),
+      type: encoded,
     };
   } finally {
     bitmap.close();
