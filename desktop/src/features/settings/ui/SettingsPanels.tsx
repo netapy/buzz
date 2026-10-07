@@ -80,6 +80,8 @@ import { ProfileSettingsCard } from "./ProfileSettingsCard";
 import { UpdateChecker } from "../UpdateChecker";
 import { SettingsSectionHeader } from "./SettingsSectionHeader";
 import { VoiceSettingsCard } from "./VoiceSettingsCard";
+import { isSettingsSectionDesktopOnly } from "@/web/capabilities";
+import { DesktopOnlyPanel } from "@/web/DesktopOnlyPanel";
 
 export type SettingsSection =
   | "profile"
@@ -803,6 +805,15 @@ export function renderSettingsSection(
   section: SettingsSection,
   props: SettingsPanelProps,
 ): React.ReactNode {
+  if (isSettingsSectionDesktopOnly(section))
+    return (
+      <DesktopOnlyPanel
+        label={
+          settingsSections.find((s) => s.value === section)?.label ?? section
+        }
+        section={section}
+      />
+    );
   switch (section) {
     case "profile":
       return (

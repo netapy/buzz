@@ -18,6 +18,22 @@
   background-color: hsl(var(--primary) / 0.2);
 }
 
+/* Desktop-only surfaces stay listed, greyed, with a small "Desktop" tag. */
+[data-desktop-only] {
+  opacity: 0.55;
+}
+[data-desktop-only]::after {
+  content: "Desktop";
+  margin-left: auto;
+  border: 1px solid hsl(var(--foreground) / 0.2);
+  border-radius: 9999px;
+  padding: 0 0.4rem;
+  font-size: 0.6875rem;
+  line-height: 1.1rem;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+
 /* A calm boot splash: the bee on the theme background, no gradient wash. */
 .buzz-setup-loading-shell {
   background: hsl(var(--background));

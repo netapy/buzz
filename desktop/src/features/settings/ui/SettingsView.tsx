@@ -47,7 +47,10 @@ export {
   DEFAULT_SETTINGS_SECTION,
   type SettingsSection,
 } from "./SettingsPanels";
-import { isSettingsSectionHiddenInBrowser } from "@/web/capabilities";
+import {
+  isSettingsSectionDesktopOnly,
+  isSettingsSectionHiddenInBrowser,
+} from "@/web/capabilities";
 
 type SettingsViewProps = SettingsPanelProps & {
   onClose: () => void;
@@ -97,6 +100,9 @@ function SettingsSectionButton({
     <SidebarMenuItem>
       <SidebarMenuButton
         aria-pressed={active}
+        data-desktop-only={
+          isSettingsSectionDesktopOnly(section.value) || undefined
+        }
         data-testid={`settings-nav-${section.value}`}
         isActive={active}
         onClick={() => onSelect(section.value)}

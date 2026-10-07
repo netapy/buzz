@@ -2,15 +2,17 @@ import { setAgentManagedProfiles } from "@/shared/api/tauriWorkspace";
 import { desktopFeatures, useFeatureToggle } from "@/shared/features";
 import type { FeatureDefinition } from "@/shared/features";
 import { Switch } from "@/shared/ui/switch";
+import { isUnavailableInBrowser } from "@/web/capabilities";
 import { SettingsOptionGroup, SettingsOptionRow } from "./SettingsOptionGroup";
 import { SettingsSectionHeader } from "./SettingsSectionHeader";
 
 function FeatureRow({ feature }: { feature: FeatureDefinition }) {
   const [enabled, toggle] = useFeatureToggle(feature.id);
   const switchId = `feature-toggle-${feature.id}`;
+  const desktopOnly = isUnavailableInBrowser(feature.id);
 
   return (
-    <SettingsOptionRow>
+    <SettingsOptionRow data-desktop-only={desktopOnly || undefined}>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium" id={`${switchId}-label`}>
           {feature.name}
@@ -21,8 +23,9 @@ function FeatureRow({ feature }: { feature: FeatureDefinition }) {
       </div>
       <Switch
         aria-labelledby={`${switchId}-label`}
-        checked={enabled}
+        checked={enabled && !desktopOnly}
         data-testid={switchId}
+        disabled={desktopOnly}
         onCheckedChange={(value) => {
           toggle(value);
           if (feature.id === "agentManagedProfiles") {

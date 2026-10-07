@@ -2,6 +2,7 @@ import manifestJson from "@features-manifest";
 import { protectedFeatureDefinitions } from "@protected-features";
 import { z } from "zod";
 import type { FeatureDefinition, FeaturesManifest } from "./types";
+import { withBrowserDefaults } from "@/web/capabilities";
 
 // Schema — runtime-validates the bundled preview-features.json at startup.
 //
@@ -37,7 +38,10 @@ function loadManifest(): FeaturesManifest {
     );
     return EMPTY_MANIFEST;
   }
-  return result.data;
+  return {
+    ...result.data,
+    features: withBrowserDefaults(result.data.features),
+  };
 }
 
 const manifest = loadManifest();
