@@ -75,6 +75,7 @@ import 'package:buzz/shared/widgets/skeleton.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 part 'thread_reply_refresh_cases.dart';
+part 'channel_detail_page_test/loading_review_tests.dart';
 part 'channel_detail_page_test/presence_tests.dart';
 
 const _channelId = '11111111-2222-4333-8444-555555555555';
@@ -490,6 +491,7 @@ double? effectiveFontSizeForText(
 }
 
 void main() {
+  _loadingReviewTests();
   threadReplyRefreshTests();
   presenceTests();
   setUp(() async {
@@ -566,7 +568,7 @@ void main() {
               };
               final keys = [
                 first,
-                second.toUpperCase(),
+                second,
                 sibling,
                 if (bystander != null) 'd' * 64,
               ];
@@ -1950,91 +1952,56 @@ void main() {
       },
     );
 
-    testWidgets('debounces same-slot reconnect skeletons before revealing', (
+    testWidgets('uses known media shapes in the reconnect shimmer', (
       tester,
     ) async {
       final relaySession = _ReconnectingRelaySession();
       await tester.pumpWidget(
         _buildTestable(
           messages: [
-            _textMsg(id: 'msg1', pubkey: 'alice', content: 'Existing message'),
+            _textMsg(
+              id: 'msg1',
+              pubkey: 'alice',
+              content:
+                  'Existing message\n![photo](https://example.com/loading.jpg)',
+              extraTags: [
+                [
+                  'imeta',
+                  'url https://example.com/loading.jpg',
+                  'm image/jpeg',
+                  'dim 1200x2400',
+                ],
+              ],
+            ),
           ],
           relaySessionNotifier: relaySession,
-          readStateNotifier: _SynchronousReadStateNotifier(
-            const ReadStateState(
-              isReady: false,
-              pubkey: 'self',
-              contexts: {},
-              version: 0,
-            ),
-          ),
         ),
       );
       await tester.pump();
-
-      expect(find.text('Existing message'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
       expect(
         tester.widget<SkeletonReveal>(find.byType(SkeletonReveal)).loading,
-        isFalse,
+        isTrue,
       );
-
-      await tester.pump(const Duration(milliseconds: 1999));
-      expect(
-        tester.widget<SkeletonReveal>(find.byType(SkeletonReveal)).loading,
-        isFalse,
-      );
-
-      await tester.pump(const Duration(milliseconds: 1));
-      await tester.pump();
-      final skeleton = find.byKey(
-        const Key('channel-detail-connection-skeleton'),
-      );
-      expect(skeleton, findsOneWidget);
-      expect(
-        find.descendant(of: skeleton, matching: find.byType(SkeletonBar)),
-        findsWidgets,
-      );
-      expect(find.text('Existing message'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(
         tester
-            .widget<Opacity>(
-              find.byKey(const Key('skeleton-reveal-placeholder')),
-            )
+            .widget<Opacity>(find.byKey(const Key('skeleton-reveal-content')))
             .opacity,
-        1,
+        0,
       );
-
+      expect(
+        find.byKey(
+          const ValueKey(
+            'message-skeleton-image:https://example.com/loading.jpg',
+          ),
+        ),
+        findsOneWidget,
+      );
       relaySession.connect();
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(
         tester.widget<SkeletonReveal>(find.byType(SkeletonReveal)).loading,
         isFalse,
-      );
-      await tester.pump(const Duration(milliseconds: 200));
-
-      expect(
-        tester
-            .widget<Opacity>(
-              find.byKey(const Key('skeleton-reveal-placeholder')),
-            )
-            .opacity,
-        closeTo(0.5, 0.01),
-      );
-      expect(
-        tester
-            .widget<Opacity>(find.byKey(const Key('skeleton-reveal-content')))
-            .opacity,
-        closeTo(0.5, 0.01),
-      );
-
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(
-        tester
-            .widget<Opacity>(find.byKey(const Key('skeleton-reveal-content')))
-            .opacity,
-        1,
       );
     });
 
@@ -2077,7 +2044,7 @@ void main() {
       );
     });
 
-    testWidgets('keeps forum content visible with reconnect shimmer feedback', (
+    testWidgets('keeps loaded forum content visible during reconnect', (
       tester,
     ) async {
       final relaySession = _ReconnectingRelaySession();
@@ -2110,12 +2077,7 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 1));
       await tester.pump();
-      final skeleton = find.byKey(const Key('forum-connection-skeleton'));
-      expect(skeleton, findsOneWidget);
-      expect(
-        find.descendant(of: skeleton, matching: find.byType(SkeletonBar)),
-        findsWidgets,
-      );
+      expect(find.byKey(const Key('forum-connection-skeleton')), findsNothing);
       expect(find.byType(SkeletonReveal), findsNothing);
     });
 
@@ -4041,6 +4003,62 @@ void main() {
       expect(summaryText.maxLines, 2);
       expect(summaryText.overflow, TextOverflow.ellipsis);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('channel catch-up hides the oldest unread jump', (
+      tester,
+    ) async {
+      final messages = [
+        for (var i = 0; i < 40; i++)
+          _textMsg(
+            id: 'msg$i',
+            pubkey: 'alice',
+            content: 'Message $i',
+            createdAt: 1000 + i,
+          ),
+      ];
+      final channelsNotifier = _FakeChannelsNotifier(
+        [_testChannel],
+        observedUnread: {
+          _channelId: [
+            makeObservedUnreadEvent(
+              id: 'msg21',
+              createdAt: 1021,
+              rootId: null,
+              highPriority: false,
+              channelType: 'stream',
+              isThreadedReply: false,
+            ),
+          ],
+        },
+      );
+      // The channel mark is older than msg21, but the web app's catch-up
+      // mark covers it.
+      final readState = _SynchronousReadStateNotifier(
+        const ReadStateState(
+          isReady: true,
+          pubkey: 'self',
+          contexts: {_channelId: 1020, 'activity:$_channelId': 1039},
+          version: 0,
+        ),
+      );
+
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: messages,
+          channelsNotifier: channelsNotifier,
+          readStateNotifier: readState,
+          users: const {
+            'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('channel-jump-to-oldest-unread')),
+        findsNothing,
+      );
     });
 
     testWidgets('jumps to the oldest unread with compact inverse controls', (
@@ -10166,7 +10184,7 @@ void main() {
     });
 
     for (final dm in [false, true]) {
-      testWidgets('native ephemeral header retains expiry disclosure dm=$dm', (
+      testWidgets('native temporary title updates retention text dm=$dm', (
         tester,
       ) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
@@ -10206,8 +10224,9 @@ void main() {
         Map payload = view.creationParams! as Map;
         expect(
           payload['ephemeralLabel'],
-          'Ephemeral channel. Cleans up after 1 hour of inactivity.',
+          contains('after 1 hour of inactivity'),
         );
+        expect(payload['subtitle'], startsWith('Temporary · 1h TTL'));
         const bridge = MethodChannel('buzz/ios_navigation_bar/297');
         tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(bridge, (
           call,
@@ -10229,14 +10248,13 @@ void main() {
         );
         container.invalidate(channelDetailsProvider(_channelId));
         await tester.pumpAndSettle();
-        expect(
-          payload['ephemeralLabel'],
-          'Ephemeral channel. Cleanup is due now.',
-        );
+        expect(payload['ephemeralLabel'], contains('Cleanup is due now'));
+        expect(payload['subtitle'], startsWith('Temporary · Cleanup due'));
         current = conversation();
         container.invalidate(channelDetailsProvider(_channelId));
         await tester.pumpAndSettle();
         expect(payload['ephemeralLabel'], isNull);
+        expect(payload['subtitle'], isNot(contains('Temporary')));
         await tester.pumpWidget(const SizedBox());
         debugDefaultTargetPlatformOverride = null;
       });
@@ -15579,7 +15597,11 @@ class _TrackingRelaySession extends RelaySessionNotifier {
 }
 
 class _ReconnectingRelaySession extends RelaySessionNotifier {
+  final SessionStatus initialStatus;
+  void setReconnecting() =>
+      state = const SessionState(status: SessionStatus.reconnecting);
   _ReconnectingRelaySession({
+    this.initialStatus = SessionStatus.reconnecting,
     this.huddleCreatePublishGate,
     this.huddleEndPublishGate,
   });
@@ -15591,8 +15613,7 @@ class _ReconnectingRelaySession extends RelaySessionNotifier {
   final List<int> publishedKinds = [];
 
   @override
-  SessionState build() =>
-      const SessionState(status: SessionStatus.reconnecting);
+  SessionState build() => SessionState(status: initialStatus);
 
   @override
   Future<List<NostrEvent>> fetchHistory(
