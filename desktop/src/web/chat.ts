@@ -1250,6 +1250,13 @@ function forumReply(
 // ── Command table ───────────────────────────────────────────────────────────
 
 export const chatCommands: CommandTable = {
+  // Mentioning an agent enrolls it in the channel's active Huddle; the browser
+  // build has no Huddles, so there is never one to join.
+  sync_agents_to_active_huddle: async () => ({
+    changed_channel_ids: [],
+    error: null,
+  }),
+
   get_channel_reconnect_repair: (args) =>
     relayQuery([channelReconnectRepairFilter(args)]),
 

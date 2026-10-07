@@ -100,7 +100,6 @@ export const NATIVE_ONLY_COMMANDS = new Set([
   "set_voice_input_mode",
   "speak_agent_message",
   "start_huddle",
-  "sync_agents_to_active_huddle",
   // Embedded terminal
   "terminal_ack",
   "terminal_attach",
