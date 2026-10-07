@@ -1,8 +1,9 @@
 {$BUZZ_DOMAIN} {
 	encode zstd gzip
 
-	# Relay surfaces that no client needs through this proxy.
-	@internal path /internal/* /operator/* /api/admin/* /api/nip-fi/* /_mesh/* /hooks/*
+	# Relay surfaces that no client needs through this proxy. Workflow webhooks
+	# (/hooks/*) stay open: each one checks its own secret header.
+	@internal path /internal/* /operator/* /api/admin/* /api/nip-fi/* /_mesh/*
 	handle @internal {
 		respond 404
 	}
