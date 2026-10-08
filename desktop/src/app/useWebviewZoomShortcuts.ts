@@ -2,6 +2,7 @@ import * as React from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import { hasPrimaryShortcutModifier } from "@/shared/lib/platform";
+import { isWebBuild } from "@/web/capabilities";
 
 /**
  * Cmd +/- scales the real root font-size, so every rem in the app — text,
@@ -101,6 +102,12 @@ export function useWebviewZoomShortcuts() {
   const zoomFactorRef = React.useRef(DEFAULT_ZOOM_FACTOR);
 
   React.useLayoutEffect(() => {
+    // Web: browser zoom only; clear any zoom stored by earlier builds.
+    if (isWebBuild) {
+      applyTextScale(DEFAULT_ZOOM_FACTOR);
+      return;
+    }
+
     const webview = getCurrentWebview();
     const storedZoomFactor = readStoredZoomFactor();
 
