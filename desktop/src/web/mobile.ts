@@ -138,6 +138,7 @@ function keepKeyboardOnSend() {
 // swipe it left to put it away, and release to settle by position or flick.
 function dragDrawer() {
   const DRAWER = '[data-sidebar="sidebar"][data-mobile="true"]';
+  const root = document.documentElement;
   let pan: {
     x: number;
     y: number;
@@ -229,8 +230,15 @@ function dragDrawer() {
           pan = null;
           return;
         }
-        if (pan.opening) pan.trigger?.click();
+        if (pan.opening) {
+          root.setAttribute("data-drawer-pan", "");
+          pan.trigger?.click();
+        }
       }
+      // The sheet mounts a frame or two after the click: CSS already holds it
+      // under the finger then, instead of flashing its slide-in animation.
+      if (pan.opening)
+        root.style.setProperty("--buzz-drawer-dx", `${Math.max(0, dx)}px`);
       pan.drawer ??= document.querySelector<HTMLElement>(DRAWER);
       pan.velocity =
         (point.clientX - pan.lastX) / (event.timeStamp - pan.lastT || 1);
@@ -247,8 +255,10 @@ function dragDrawer() {
   const release = () => {
     const done = pan;
     pan = null;
-    if (done?.axis !== "x" || !done.drawer) return;
-    const { drawer, offset, velocity } = done;
+    root.removeAttribute("data-drawer-pan");
+    const drawer = done?.drawer ?? document.querySelector<HTMLElement>(DRAWER);
+    if (done?.axis !== "x" || !drawer) return;
+    const { offset, velocity } = done;
     const width = drawer.offsetWidth;
     const open = Math.abs(velocity) > 0.3 ? velocity > 0 : offset > -width / 2;
     haptic(15);

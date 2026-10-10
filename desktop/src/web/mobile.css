@@ -70,6 +70,17 @@
   html {
     touch-action: manipulation;
   }
+  /* While a swipe pulls the drawer open (mobile.ts), the freshly mounted
+     sheet sits under the finger and its scrim stays clear until the drag
+     takes over, instead of playing the slide-in for a frame. */
+  [data-drawer-pan] [data-sidebar="sidebar"][data-mobile="true"] {
+    animation: none;
+    transform: translateX(min(0px, calc(var(--buzz-drawer-dx, 0px) - 100%)));
+  }
+  [data-drawer-pan] :has(+ [data-sidebar="sidebar"][data-mobile="true"]) {
+    animation: none;
+    opacity: 0;
+  }
   /* Press-and-hold on icons and avatars never pops a save-image menu. */
   :is(button, a, [role="button"]) img {
     -webkit-touch-callout: none;
