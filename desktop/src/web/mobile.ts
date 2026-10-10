@@ -522,36 +522,6 @@ function matchStatusBar() {
   sync();
 }
 
-// Android's back gesture closes the open sheet, menu or dialog instead of
-// leaving the screen: an overlay owns one history entry while it is open.
-function backClosesOverlays() {
-  // Radix overlays, the drawer's sheet included (it is a dialog too).
-  const OVERLAY = ':is([role="dialog"], [role="menu"])[data-state="open"]';
-  let owned = false;
-  new MutationObserver(() => {
-    if (!phone.matches) return;
-    const open = !!document.querySelector(OVERLAY);
-    if (open && !owned)
-      history.pushState({ ...history.state, buzzOverlay: true }, "");
-    // Closed some other way (tap outside, a button): drop its entry once the
-    // app has had time to navigate. Picking a channel closes the drawer
-    // before the route changes, and going back then would undo that.
-    else if (!open && owned)
-      window.setTimeout(() => {
-        if (history.state?.buzzOverlay && !document.querySelector(OVERLAY))
-          history.back();
-      }, 500); // ponytail: a route slower than 500ms still gets undone
-    owned = open;
-  }).observe(document.body, { childList: true, subtree: true });
-  window.addEventListener("popstate", () => {
-    if (!owned) return;
-    owned = false;
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-  });
-}
-
 export function initializeMobileShell(): void {
   phone = matchMedia("(max-width: 767px)");
   touch = matchMedia("(pointer: coarse)");
@@ -566,5 +536,4 @@ export function initializeMobileShell(): void {
   tickOnTap();
   reloadIntoNewBuild();
   matchStatusBar();
-  backClosesOverlays();
 }
