@@ -70,11 +70,7 @@
   html {
     touch-action: manipulation;
   }
-  /* Lists scroll on their own like native ones: no chaining into the page,
-     and press-and-hold on icons and avatars never pops a save-image menu. */
-  * {
-    overscroll-behavior: contain;
-  }
+  /* Press-and-hold on icons and avatars never pops a save-image menu. */
   :is(button, a, [role="button"]) img {
     -webkit-touch-callout: none;
   }
