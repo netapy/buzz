@@ -38,6 +38,12 @@
 .buzz-setup-loading-shell {
   background: hsl(var(--background));
 }
+/* Native controls, the caret and checkboxes take the app's accent. */
+:root {
+  accent-color: hsl(var(--primary));
+  caret-color: hsl(var(--primary));
+}
+
 /* Controls behave like a native app's: dragging across them selects nothing. */
 :is(button, [role="button"], [role="tab"], [role="menuitem"], nav) {
   -webkit-user-select: none;
@@ -63,6 +69,14 @@
      never waits for a zoom. */
   html {
     touch-action: manipulation;
+  }
+  /* Lists scroll on their own like native ones: no chaining into the page,
+     and press-and-hold on icons and avatars never pops a save-image menu. */
+  * {
+    overscroll-behavior: contain;
+  }
+  :is(button, a, [role="button"]) img {
+    -webkit-touch-callout: none;
   }
   /* Controls press in under the finger and spring back, like native ones. */
   :is(button, [role="button"], [role="menuitem"], [role="tab"]) {
