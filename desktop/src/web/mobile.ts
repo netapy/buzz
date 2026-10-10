@@ -1,13 +1,34 @@
 // Phone behaviour for the browser build: viewport, on-screen keyboard,
-// keyboard-free loads and long-press message actions. Layout lives in
+// keyboard-free loads, long-press actions, swipe to reply and haptics. Layout lives in
 // mobile.css; both only engage below the app's 768px mobile breakpoint.
 
 // Set on init: node tests import this module without matchMedia.
 let phone: MediaQueryList;
 let touch: MediaQueryList;
 const LONG_PRESS_MS = 420;
+const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+const EDGE = 24; // a swipe from the screen's left edge opens the drawer
+const ROW =
+  '[data-testid="message-row"], [data-testid^="home-inbox-"][data-testid$="-message"]';
 const TEXT_INPUT =
   'textarea, [contenteditable="true"], input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="password"], input[type="number"]';
+
+// A light tick like native controls. Android has the Vibration API; iOS
+// Safari has none but ticks when a switch toggles, so click a hidden one.
+function haptic() {
+  if (!touch.matches) return;
+  if (navigator.vibrate) {
+    navigator.vibrate(8);
+    return;
+  }
+  const label = document.createElement("label");
+  label.ariaHidden = "true";
+  label.style.display = "none";
+  label.innerHTML = '<input type="checkbox" switch>';
+  document.head.append(label);
+  label.click();
+  label.remove();
+}
 
 // Android resizes the layout for the keyboard only when asked; iOS ignores
 // this and is handled by following the visual viewport below.
@@ -110,7 +131,6 @@ function keepKeyboardOnSend() {
 // swipe it left to put it away, and release to settle by position or flick.
 function dragDrawer() {
   const DRAWER = '[data-sidebar="sidebar"][data-mobile="true"]';
-  const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
   let pan: {
     x: number;
     y: number;
@@ -168,6 +188,7 @@ function dragDrawer() {
         opening &&
         (document.querySelector('[role="dialog"], [role="menu"]') ||
           target.closest(`${TEXT_INPUT}, [data-testid="message-composer"]`) ||
+          (target.closest(ROW) && event.touches[0].clientX > EDGE) ||
           scrollsSideways(target))
       )
         return;
@@ -289,16 +310,14 @@ function revealMessageActionsOnLongPress() {
         )
       )
         return;
-      const row = target.closest(
-        '[data-testid="message-row"], [data-testid^="home-inbox-"][data-testid$="-message"]',
-      );
+      const row = target.closest(ROW);
       activate(null);
       if (!row || !phone.matches) return;
       const point = event.touches[0];
       origin = { x: point.clientX, y: point.clientY };
       timer = window.setTimeout(() => {
         activate(row);
-        navigator.vibrate?.(8);
+        haptic();
         origin = null;
         swallowClick = true;
       }, LONG_PRESS_MS);
@@ -333,6 +352,92 @@ function revealMessageActionsOnLongPress() {
   document.addEventListener("touchcancel", clear, { passive: true });
 }
 
+// Swipe a message right to reply, like native chat apps: the row follows the
+// finger, ticks once past the threshold and springs back on release.
+function swipeToReply() {
+  const THRESHOLD = 56;
+  let swipe: {
+    row: HTMLElement;
+    x: number;
+    y: number;
+    dx: number;
+    axis: "x" | "y" | null;
+  } | null = null;
+  const settle = (row: HTMLElement) => {
+    row.style.transition = `transform 220ms ${EASE}`;
+    row.style.transform = "";
+    window.setTimeout(() => (row.style.transition = ""), 240);
+  };
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      const point = event.touches[0];
+      const row = (event.target as Element).closest<HTMLElement>(ROW);
+      swipe =
+        phone.matches &&
+        row &&
+        event.touches.length === 1 &&
+        point.clientX > EDGE
+          ? { row, x: point.clientX, y: point.clientY, dx: 0, axis: null }
+          : null;
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!swipe) return;
+      const point = event.touches[0];
+      const dx = point.clientX - swipe.x;
+      if (!swipe.axis) {
+        if (Math.hypot(dx, point.clientY - swipe.y) < 10) return;
+        swipe.axis =
+          Math.abs(dx) > Math.abs(point.clientY - swipe.y) && dx > 0
+            ? "x"
+            : "y";
+      }
+      if (swipe.axis === "y") return;
+      // Past the threshold the row resists, as native swipe actions do.
+      const offset =
+        dx < THRESHOLD ? Math.max(0, dx) : THRESHOLD + (dx - THRESHOLD) / 4;
+      if (swipe.dx < THRESHOLD !== offset < THRESHOLD) haptic();
+      swipe.dx = offset;
+      swipe.row.style.transform = `translateX(${offset}px)`;
+    },
+    { passive: true },
+  );
+  const release = () => {
+    const done = swipe;
+    swipe = null;
+    if (done?.axis !== "x") return;
+    settle(done.row);
+    if (done.dx >= THRESHOLD)
+      done.row
+        .querySelector<HTMLElement>('[data-testid^="reply-message-"]')
+        ?.click();
+  };
+  document.addEventListener("touchend", release, { passive: true });
+  document.addEventListener(
+    "touchcancel",
+    () => {
+      if (swipe) settle(swipe.row);
+      swipe = null;
+    },
+    { passive: true },
+  );
+}
+
+// Switches tick under the finger, as native toggles do.
+function tickOnToggle() {
+  document.addEventListener(
+    "click",
+    (event) => {
+      if ((event.target as Element).closest?.('[role="switch"]')) haptic();
+    },
+    { capture: true, passive: true },
+  );
+}
+
 export function initializeMobileShell(): void {
   phone = matchMedia("(max-width: 767px)");
   touch = matchMedia("(pointer: coarse)");
@@ -343,4 +448,6 @@ export function initializeMobileShell(): void {
   dragDrawer();
   ignoreTapHover();
   revealMessageActionsOnLongPress();
+  swipeToReply();
+  tickOnToggle();
 }

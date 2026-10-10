@@ -38,6 +38,12 @@
 .buzz-setup-loading-shell {
   background: hsl(var(--background));
 }
+/* Controls behave like a native app's: dragging across them selects nothing. */
+:is(button, [role="button"], [role="tab"], [role="menuitem"], nav) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .buzz-setup-loading-shell [data-testid="setup-grainient-background"] {
   display: none;
 }
@@ -51,6 +57,15 @@
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
+  }
+
+  /* Native press feedback: controls dim under the finger, and double-tap
+     never waits for a zoom. */
+  html {
+    touch-action: manipulation;
+  }
+  :is(button, [role="button"]):active:not(:disabled) {
+    opacity: 0.6;
   }
 
   /* Follow the visual viewport (see mobile.ts) so the on-screen keyboard
