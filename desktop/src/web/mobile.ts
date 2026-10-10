@@ -5,20 +5,23 @@
 // Set on init: node tests import this module without matchMedia.
 let phone: MediaQueryList;
 let touch: MediaQueryList;
+let focusAllowedUntil = 0;
 const LONG_PRESS_MS = 420;
 const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
-const EDGE = 24; // a swipe from the screen's left edge opens the drawer
 const ROW =
   '[data-testid="message-row"], [data-testid^="home-inbox-"][data-testid$="-message"]';
 const TEXT_INPUT =
   'textarea, [contenteditable="true"], input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="password"], input[type="number"]';
 
-// A light tick like native controls. Android has the Vibration API; iOS
-// Safari has none but ticks when a switch toggles, so click a hidden one.
-function haptic() {
-  if (!touch.matches) return;
+// A tick like native controls, `ms` long on Android (shorter pulses are
+// dropped by many motors). iOS Safari has no Vibration API but ticks when a
+// switch toggles, so it clicks a hidden one; its tick has a single strength.
+let lastHaptic = 0;
+function haptic(ms = 12) {
+  if (!touch.matches || performance.now() - lastHaptic < 60) return;
+  lastHaptic = performance.now();
   if (navigator.vibrate) {
-    navigator.vibrate(8);
+    navigator.vibrate(ms);
     return;
   }
   const label = document.createElement("label");
@@ -88,7 +91,11 @@ function keepKeyboardClosedUntilFieldTap() {
   );
   const focus = HTMLElement.prototype.focus;
   HTMLElement.prototype.focus = function (options?: FocusOptions) {
-    if (phone.matches && this.matches(TEXT_INPUT)) {
+    if (
+      phone.matches &&
+      this.matches(TEXT_INPUT) &&
+      performance.now() > focusAllowedUntil
+    ) {
       const touched =
         lastTouch && performance.now() - lastTouch.at < 1000
           ? lastTouch.path
@@ -188,7 +195,6 @@ function dragDrawer() {
         opening &&
         (document.querySelector('[role="dialog"], [role="menu"]') ||
           target.closest(`${TEXT_INPUT}, [data-testid="message-composer"]`) ||
-          (target.closest(ROW) && event.touches[0].clientX > EDGE) ||
           scrollsSideways(target))
       )
         return;
@@ -245,6 +251,7 @@ function dragDrawer() {
     const { drawer, offset, velocity } = done;
     const width = drawer.offsetWidth;
     const open = Math.abs(velocity) > 0.3 ? velocity > 0 : offset > -width / 2;
+    haptic(10);
     if (!open) return done.trigger?.click();
     place(drawer, 0, 220);
     window.setTimeout(() => place(drawer, null), 240);
@@ -317,7 +324,7 @@ function revealMessageActionsOnLongPress() {
       origin = { x: point.clientX, y: point.clientY };
       timer = window.setTimeout(() => {
         activate(row);
-        haptic();
+        haptic(25);
         origin = null;
         swallowClick = true;
       }, LONG_PRESS_MS);
@@ -352,8 +359,8 @@ function revealMessageActionsOnLongPress() {
   document.addEventListener("touchcancel", clear, { passive: true });
 }
 
-// Swipe a message right to reply, like native chat apps: the row follows the
-// finger, ticks once past the threshold and springs back on release.
+// Swipe a message left to reply, like native chat apps: the row follows the
+// finger, ticks once past the threshold, springs back and opens the keyboard.
 function swipeToReply() {
   const THRESHOLD = 56;
   let swipe: {
@@ -374,10 +381,7 @@ function swipeToReply() {
       const point = event.touches[0];
       const row = (event.target as Element).closest<HTMLElement>(ROW);
       swipe =
-        phone.matches &&
-        row &&
-        event.touches.length === 1 &&
-        point.clientX > EDGE
+        phone.matches && row && event.touches.length === 1
           ? { row, x: point.clientX, y: point.clientY, dx: 0, axis: null }
           : null;
     },
@@ -392,15 +396,17 @@ function swipeToReply() {
       if (!swipe.axis) {
         if (Math.hypot(dx, point.clientY - swipe.y) < 10) return;
         swipe.axis =
-          Math.abs(dx) > Math.abs(point.clientY - swipe.y) && dx > 0
+          Math.abs(dx) > Math.abs(point.clientY - swipe.y) && dx < 0
             ? "x"
             : "y";
       }
       if (swipe.axis === "y") return;
       // Past the threshold the row resists, as native swipe actions do.
-      const offset =
-        dx < THRESHOLD ? Math.max(0, dx) : THRESHOLD + (dx - THRESHOLD) / 4;
-      if (swipe.dx < THRESHOLD !== offset < THRESHOLD) haptic();
+      const pull = -dx;
+      const offset = -(pull < THRESHOLD
+        ? Math.max(0, pull)
+        : THRESHOLD + (pull - THRESHOLD) / 4);
+      if (-swipe.dx < THRESHOLD !== -offset < THRESHOLD) haptic(18);
       swipe.dx = offset;
       swipe.row.style.transform = `translateX(${offset}px)`;
     },
@@ -411,10 +417,29 @@ function swipeToReply() {
     swipe = null;
     if (done?.axis !== "x") return;
     settle(done.row);
-    if (done.dx >= THRESHOLD)
-      done.row
-        .querySelector<HTMLElement>('[data-testid^="reply-message-"]')
-        ?.click();
+    if (-done.dx < THRESHOLD) return;
+    // The keyboard only opens from focus inside the gesture, before the reply
+    // composer exists: focus a stand-in now, then hand focus to the composer.
+    focusAllowedUntil = performance.now() + 1500;
+    const standIn = document.createElement("input");
+    standIn.style.cssText =
+      "position:fixed;top:0;opacity:0;height:1px;font-size:16px;"; // 16px: no iOS zoom
+    document.body.append(standIn);
+    standIn.focus();
+    done.row
+      .querySelector<HTMLElement>('[data-testid^="reply-message-"]')
+      ?.click();
+    window.setTimeout(() => {
+      if (document.activeElement === standIn)
+        [
+          ...document.querySelectorAll<HTMLElement>(
+            '[data-testid="message-composer"] [contenteditable="true"]',
+          ),
+        ]
+          .at(-1)
+          ?.focus();
+      standIn.remove();
+    }, 350);
   };
   document.addEventListener("touchend", release, { passive: true });
   document.addEventListener(
@@ -427,15 +452,55 @@ function swipeToReply() {
   );
 }
 
-// Switches tick under the finger, as native toggles do.
-function tickOnToggle() {
+// Taps on the controls people use most tick like native ones: a firmer one
+// for sending, a light one for reactions, choices and navigation.
+const TAP_TICKS: [string, number][] = [
+  ['[data-testid="send-message"]', 20],
+  [
+    '[data-testid="message-reactions"] button, [data-testid^="react-message-"], [data-testid^="add-reaction-"], [data-testid^="reply-message-"]',
+    14,
+  ],
+  [
+    '[role="switch"], [role="tab"], [role="menuitem"], [role="option"], [role="gridcell"] button, [data-sidebar="menu-button"], [data-sidebar="trigger"]',
+    10,
+  ],
+];
+function tickOnTap() {
   document.addEventListener(
     "click",
     (event) => {
-      if ((event.target as Element).closest?.('[role="switch"]')) haptic();
+      const target = event.target as Element;
+      const tick = TAP_TICKS.find(([selector]) => target.closest?.(selector));
+      if (tick) haptic(tick[1]);
     },
     { capture: true, passive: true },
   );
+}
+
+// An installed app can stay open for days. When it comes back to the
+// foreground after a deploy, reload into the new build, unless a draft is
+// being typed.
+function reloadIntoNewBuild() {
+  const entry = () =>
+    document.querySelector<HTMLScriptElement>('script[type="module"][src]')
+      ?.src;
+  const current = entry();
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible" || !current) return;
+    const html = await fetch("/", {
+      headers: { Accept: "text/html" },
+      cache: "no-store",
+    })
+      .then((response) => response.text())
+      .catch(() => "");
+    const next = html.match(/<script type="module"[^>]* src="([^"]+)"/)?.[1];
+    if (
+      next &&
+      new URL(next, location.href).href !== current &&
+      !document.activeElement?.matches(TEXT_INPUT)
+    )
+      location.reload();
+  });
 }
 
 export function initializeMobileShell(): void {
@@ -449,5 +514,6 @@ export function initializeMobileShell(): void {
   ignoreTapHover();
   revealMessageActionsOnLongPress();
   swipeToReply();
-  tickOnToggle();
+  tickOnTap();
+  reloadIntoNewBuild();
 }
