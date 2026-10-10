@@ -13,11 +13,11 @@ const ROW =
 const TEXT_INPUT =
   'textarea, [contenteditable="true"], input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="password"], input[type="number"]';
 
-// A tick like native controls, `ms` long on Android (shorter pulses are
-// dropped by many motors). iOS Safari has no Vibration API but ticks when a
+// A tick like native controls, `ms` long on Android (many motors, Samsung's
+// first, drop pulses under ~15ms and barely show 20ms). iOS Safari has no Vibration API but ticks when a
 // switch toggles, so it clicks a hidden one; its tick has a single strength.
 let lastHaptic = 0;
-function haptic(ms = 12) {
+function haptic(ms = 15) {
   if (!touch.matches || performance.now() - lastHaptic < 60) return;
   lastHaptic = performance.now();
   if (navigator.vibrate) {
@@ -251,7 +251,7 @@ function dragDrawer() {
     const { drawer, offset, velocity } = done;
     const width = drawer.offsetWidth;
     const open = Math.abs(velocity) > 0.3 ? velocity > 0 : offset > -width / 2;
-    haptic(10);
+    haptic(15);
     if (!open) return done.trigger?.click();
     place(drawer, 0, 220);
     window.setTimeout(() => place(drawer, null), 240);
@@ -324,7 +324,7 @@ function revealMessageActionsOnLongPress() {
       origin = { x: point.clientX, y: point.clientY };
       timer = window.setTimeout(() => {
         activate(row);
-        haptic(25);
+        haptic(40);
         origin = null;
         swallowClick = true;
       }, LONG_PRESS_MS);
@@ -406,7 +406,7 @@ function swipeToReply() {
       const offset = -(pull < THRESHOLD
         ? Math.max(0, pull)
         : THRESHOLD + (pull - THRESHOLD) / 4);
-      if (-swipe.dx < THRESHOLD !== -offset < THRESHOLD) haptic(18);
+      if (-swipe.dx < THRESHOLD !== -offset < THRESHOLD) haptic(25);
       swipe.dx = offset;
       swipe.row.style.transform = `translateX(${offset}px)`;
     },
@@ -418,7 +418,7 @@ function swipeToReply() {
     if (done?.axis !== "x") return;
     settle(done.row);
     if (-done.dx < THRESHOLD) return;
-    haptic(20);
+    haptic(35);
     // The keyboard only opens from focus inside the gesture, before the reply
     // composer exists: focus a stand-in now, then hand focus to the composer.
     focusAllowedUntil = performance.now() + 1500;
@@ -456,14 +456,14 @@ function swipeToReply() {
 // Taps on the controls people use most tick like native ones: a firmer one
 // for sending, a light one for reactions, choices and navigation.
 const TAP_TICKS: [string, number][] = [
-  ['[data-testid="send-message"]', 20],
+  ['[data-testid="send-message"]', 30],
   [
     '[data-testid="message-reactions"] button, [data-testid^="react-message-"], [data-testid^="add-reaction-"], [data-testid^="reply-message-"]',
-    14,
+    20,
   ],
   [
     '[role="switch"], [role="tab"], [role="menuitem"], [role="option"], [role="gridcell"] button, [data-sidebar="menu-button"], [data-sidebar="trigger"]',
-    10,
+    15,
   ],
 ];
 function tickOnTap() {
