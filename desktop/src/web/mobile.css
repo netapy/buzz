@@ -74,18 +74,10 @@
   :is(button, a, [role="button"]) img {
     -webkit-touch-callout: none;
   }
-  /* Controls press in under the finger and spring back, like native ones. */
-  :is(button, [role="button"], [role="menuitem"], [role="tab"]) {
-    transition:
-      transform 160ms cubic-bezier(0.32, 0.72, 0, 1),
-      opacity 160ms ease;
-  }
-  :is(button, [role="button"], [role="menuitem"], [role="tab"]):active:not(
-    :disabled
-  ) {
-    transform: scale(0.94);
-    opacity: 0.8;
-    transition-duration: 60ms;
+  /* Controls dim under the finger. ponytail: opacity only, a transform
+     under a moving finger is how gestures get lost. */
+  :is(button, [role="button"]):active:not(:disabled) {
+    opacity: 0.7;
   }
 
   /* Follow the visual viewport (see mobile.ts) so the on-screen keyboard

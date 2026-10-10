@@ -418,6 +418,7 @@ function swipeToReply() {
     if (done?.axis !== "x") return;
     settle(done.row);
     if (-done.dx < THRESHOLD) return;
+    haptic(20);
     // The keyboard only opens from focus inside the gesture, before the reply
     // composer exists: focus a stand-in now, then hand focus to the composer.
     focusAllowedUntil = performance.now() + 1500;
@@ -532,9 +533,14 @@ function backClosesOverlays() {
     const open = !!document.querySelector(OVERLAY);
     if (open && !owned)
       history.pushState({ ...history.state, buzzOverlay: true }, "");
-    // Closed some other way (tap outside, a button): drop its entry, unless
-    // the app navigated on top of it (picking a channel in the drawer).
-    else if (!open && owned && history.state?.buzzOverlay) history.back();
+    // Closed some other way (tap outside, a button): drop its entry once the
+    // app has had time to navigate. Picking a channel closes the drawer
+    // before the route changes, and going back then would undo that.
+    else if (!open && owned)
+      window.setTimeout(() => {
+        if (history.state?.buzzOverlay && !document.querySelector(OVERLAY))
+          history.back();
+      }, 500); // ponytail: a route slower than 500ms still gets undone
     owned = open;
   }).observe(document.body, { childList: true, subtree: true });
   window.addEventListener("popstate", () => {
