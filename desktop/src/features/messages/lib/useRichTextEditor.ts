@@ -50,6 +50,7 @@ import { SpoilerMark } from "./spoilerMark";
 import { createComposerLinkPasteHandler } from "./composerMessageLinkNode";
 import type { ComposerMessageLinkChannel } from "./useComposerMessageLinks";
 import { useComposerMessageLinks } from "./useComposerMessageLinks";
+import { isWebBuild } from "@/web/capabilities";
 
 /**
  * Plain-text edit descriptor returned by autocomplete hooks
@@ -401,8 +402,9 @@ export function useRichTextEditor({
                 )(view, event as ClipboardEvent),
         },
         attributes: {
-          autocapitalize: "none",
-          autocorrect: "off",
+          // Web: phone keyboards correct and capitalize chat like native apps.
+          autocapitalize: isWebBuild ? "sentences" : "none",
+          autocorrect: isWebBuild ? "on" : "off",
           class: `${MESSAGE_MARKDOWN_CLASS} min-h-0 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-0 text-message font-normal tracking-normal text-foreground shadow-none focus-visible:ring-0 caret-foreground outline-hidden max-w-none`,
           "data-testid": "message-input",
           spellcheck: "true",
