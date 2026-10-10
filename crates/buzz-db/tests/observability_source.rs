@@ -174,7 +174,7 @@ fn p0_pool_acquisitions_use_typed_operation_pairs_without_other() {
         .0;
     assert!(soft_delete_discovery.contains("WriterOperation::EventWrite"));
     assert!(soft_delete_discovery.contains("begin_community_event_write_transaction("));
-    assert!(soft_delete_discovery.contains("execute(&mut *tx)"));
+    assert!(soft_delete_discovery.contains("execute(tx.conn())"));
 
     let side_effects = include_str!("../../buzz-relay/src/handlers/side_effects.rs");
     assert!(side_effects.contains("query_events_for_event_write"));
@@ -658,17 +658,12 @@ fn pool_level_insert_mentions_opens_the_tenant_local_chokepoint() {
 
 #[test]
 fn event_write_paths_include_tenant_local_chokepoint_calls() {
-    fn has_any_tenant_local_chokepoint(source: &str) -> bool {
-        source.contains(COMMUNITY_CHOKEPOINT_MARKER)
-            || source.contains(COMMUNITY_CHOKEPOINT_LEGACY_MARKER)
-    }
-
     let event = include_str!("../src/store/event.rs");
     let insert_event = event
         .split_once("pub async fn insert_event(\n")
         .expect("event store must expose pool-level insert_event")
         .1
-        .split_once("/// Insert a Nostr event in a caller-owned PostgreSQL transaction.")
+        .split_once("/// Insert a Nostr event in a caller-owned admitted transaction")
         .expect("pool insert must precede transaction-seam insert")
         .0;
     assert!(
@@ -854,7 +849,7 @@ fn legacy_compatibility_metrics_remain_pinned_to_the_preexisting_event_write_ent
         .split_once("pub async fn insert_event(\n")
         .expect("event store must expose pool-level insert_event")
         .1
-        .split_once("/// Insert a Nostr event in a caller-owned PostgreSQL transaction.")
+        .split_once("/// Insert a Nostr event in a caller-owned admitted transaction")
         .expect("pool insert must precede transaction-seam insert")
         .0;
     assert!(
@@ -884,17 +879,17 @@ fn legacy_compatibility_metrics_remain_pinned_to_the_preexisting_event_write_ent
     );
 }
 
-/// Function-level syntactic routing backstop.
+/// Function-level routing check for guarded-table writers.
 ///
 /// A file can contain both a legitimate chokepoint writer and a bypass writer.
-/// This check is intentionally source-shape only: every writing function must
-/// expose a syntactic route marker by either calling the tenant-local
-/// community chokepoint, accepting a caller-owned guarded
-/// transaction/connection, or using reviewed adapter-owned transaction state
-/// whose constructor is pinned to the same chokepoint.
+/// Every writing function must either open the tenant-local community
+/// chokepoint itself, take a caller-owned `&mut AdmittedTx` (which only the
+/// chokepoint can construct, so the compiler proves provenance), use reviewed
+/// adapter-owned transaction state whose constructor is pinned to the
+/// chokepoint, or appear in a reviewed exception list below.
 ///
-/// It does not prove transaction/connection provenance or relay-side admission;
-/// commit-time database fences remain the authoritative safety backstop.
+/// A raw `&mut Transaction` or `&mut PgConnection` parameter is not a route:
+/// nothing about its type says the transaction was admitted.
 const GUARDED_TABLE_WRITE_MARKERS: [&str; 9] = [
     "INSERT INTO events",
     "UPDATE events",
@@ -916,12 +911,7 @@ fn has_any_tenant_local_chokepoint(source: &str) -> bool {
         || source.contains(COMMUNITY_CHOKEPOINT_LEGACY_MARKER)
 }
 
-const GUARDED_TX_SIGNATURE_MARKERS: [&str; 4] = [
-    "&mut sqlx::Transaction<",
-    "&mut Transaction<",
-    "&mut PgConnection",
-    "&mut sqlx::PgConnection",
-];
+const ADMITTED_TX_SIGNATURE_MARKERS: [&str; 2] = ["&mut AdmittedTx", "&mut crate::AdmittedTx"];
 
 // Narrow reviewed exceptions for non-serving verification probes only.
 const GUARDED_WRITE_FUNCTION_EXCEPTIONS: [&str; 3] = [
@@ -960,19 +950,28 @@ fn fn_signature_starts_here(trimmed_line: &str) -> bool {
 /// signature to the doc comment or attributes of the next function, so a
 /// following function's docs (which may quote SQL) are never attributed to the
 /// function before it.
+///
+/// Signatures and attributes are found in the masked view (see
+/// [`mask_comments_and_literals`]), so an `fn` line inside a comment or a
+/// multiline string never splits a function. Doc comments are blank in that
+/// view, so `///` lead-ins are read from the original line.
 fn function_slices(production_source: &str) -> Vec<&str> {
+    let masked = mask_comments_and_literals(production_source);
     // (signature offset, offset where the next function's lead-in begins)
     let mut starts = Vec::new();
     let mut lead_ins = Vec::new();
     let mut lead_in: Option<usize> = None;
     let mut offset = 0usize;
-    for line in production_source.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
+    for (line, code) in production_source
+        .split_inclusive('\n')
+        .zip(masked.split_inclusive('\n'))
+    {
+        let trimmed = code.trim_start();
+        let indent = code.len() - trimmed.len();
         if fn_signature_starts_here(trimmed) {
             starts.push(offset + indent);
             lead_ins.push(lead_in.take().unwrap_or(offset + indent));
-        } else if trimmed.starts_with("///") || trimmed.starts_with("#[") {
+        } else if line.trim_start().starts_with("///") || trimmed.starts_with("#[") {
             lead_in.get_or_insert(offset);
         } else {
             lead_in = None;
@@ -1005,9 +1004,9 @@ fn function_is_guarded_write_exception(function_header: &str) -> bool {
         .any(|exception| function_header.starts_with(exception))
 }
 
-fn function_accepts_guarded_transaction_or_connection(function_source: &str) -> bool {
+fn function_accepts_admitted_transaction(function_source: &str) -> bool {
     let signature = function_source.split('{').next().unwrap_or(function_source);
-    GUARDED_TX_SIGNATURE_MARKERS
+    ADMITTED_TX_SIGNATURE_MARKERS
         .iter()
         .any(|marker| signature.contains(marker))
 }
@@ -1038,7 +1037,7 @@ fn function_has_syntactic_guarded_write_route(
     let header = function_header(function_source);
 
     has_any_tenant_local_chokepoint(function_source)
-        || function_accepts_guarded_transaction_or_connection(function_source)
+        || function_accepts_admitted_transaction(function_source)
         || (function_uses_guarded_tx_adapter_state(function_source)
             && adapter_constructor_is_chokepoint_pinned(production_source, header))
 }
@@ -1135,6 +1134,198 @@ pub async fn bypass_with_pool_begin(pool: &sqlx::PgPool) {
     );
 }
 
+#[test]
+fn serving_table_policy_requires_admitted_tx_not_raw_transactions() {
+    let source = r#"
+pub(crate) async fn raw_transaction_writer(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+pub(crate) async fn raw_connection_writer(conn: &mut sqlx::PgConnection) {
+    sqlx::query("INSERT INTO event_mentions (community_id, event_id) VALUES ($1, $2)")
+        .execute(conn)
+        .await
+        .expect("write");
+}
+pub(crate) async fn admitted_writer(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .bind(tx.community().as_uuid())
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+"#;
+
+    let violations = syntactic_guarded_write_route_violations(source);
+    assert_eq!(
+        violations,
+        [
+            "pub(crate) async fn raw_transaction_writer(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) {",
+            "pub(crate) async fn raw_connection_writer(conn: &mut sqlx::PgConnection) {",
+        ],
+        "a raw transaction or connection parameter carries no admission proof; only \
+         `&mut AdmittedTx` does"
+    );
+}
+
+/// Every function in `source` that builds an `AdmittedTx`, paired with whether
+/// it admits the transaction it wraps. The scan deliberately does not strip
+/// `#[cfg(test)]` items: a test-only forge would let crate tests run follow-ups
+/// on an unadmitted transaction, so it must admit like any other constructor.
+fn admitted_tx_constructors(source: &str) -> Vec<(String, bool)> {
+    let production: String = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        // `impl … for AdmittedTx {` headers open a block, not a value.
+        .filter(|line| !line.trim_start().starts_with("impl"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    function_slices(&production)
+        .into_iter()
+        .filter(|function| function.contains("Self {") || function.contains("AdmittedTx {"))
+        .map(|function| {
+            let admits = function.contains(".guard_transaction(&mut tx, community)")
+                || function.contains(".guard_transaction_with_serving_lease(&mut tx, lease)");
+            (function.to_string(), admits)
+        })
+        .collect()
+}
+
+#[test]
+fn admitted_tx_is_constructed_only_by_admitting_constructors() {
+    // The fields are private to `runtime/admitted_tx.rs`, so only that file can
+    // build the value. Pin that each function there that builds it also admits
+    // the transaction it wraps, so a new unguarded constructor cannot slip in.
+    let constructors = admitted_tx_constructors(include_str!("../src/runtime/admitted_tx.rs"));
+    assert_eq!(
+        constructors.len(),
+        2,
+        "AdmittedTx must have exactly the two admitting constructors"
+    );
+    for (constructor, admits) in constructors {
+        assert!(
+            admits,
+            "AdmittedTx constructor must admit the transaction it wraps: {constructor}"
+        );
+    }
+}
+
+#[test]
+fn admitted_tx_constructor_scan_reports_test_only_forges() {
+    let source = r#"
+impl AdmittedTx {
+    pub(crate) async fn admit(mut tx: Tx, community: CommunityId) -> Result<Self> {
+        guard.guard_transaction(&mut tx, community).await?;
+        Ok(Self { tx, community })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn forge_for_tests(tx: Tx, community: CommunityId) -> Self {
+        Self { tx, community }
+    }
+}
+"#;
+    let unadmitted: Vec<String> = admitted_tx_constructors(source)
+        .into_iter()
+        .filter(|(_, admits)| !admits)
+        .map(|(function, _)| {
+            function
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        unadmitted,
+        ["pub(crate) fn forge_for_tests(tx: Tx, community: CommunityId) -> Self {"],
+        "an indented `#[cfg(test)]` forge must still be reported as unadmitted"
+    );
+}
+
+#[test]
+fn cfg_test_items_are_skipped_without_hiding_later_production_code() {
+    let source = "pub fn before() {}\n\
+#[cfg(test)]\n\
+struct Marker;\n\
+pub fn after_struct() {}\n\
+#[cfg(test)]\n\
+static LOCK: std::sync::Mutex<()> =\n\
+    std::sync::Mutex::new(());\n\
+pub fn after_static() {}\n\
+#[cfg(test)]\n\
+static S: [u8; 1] =\n\
+    [const { 0 }; 1];\n\
+pub fn after_const_block() {}\n\
+#[cfg(test)]\n\
+#[derive(Debug)]\n\
+struct Fields {\n\
+    value: u8,\n\
+}\n\
+pub fn after_fields() {}\n\
+#[cfg(test)]\n\
+mod tests {\n\
+    fn hidden() {\n\
+    }\n\
+}\n\
+pub fn after_module() {}\n";
+    let production = strip_cfg_test_items(source);
+    for name in [
+        "before",
+        "after_struct",
+        "after_static",
+        "after_const_block",
+        "after_fields",
+        "after_module",
+    ] {
+        assert!(
+            production.contains(&format!("pub fn {name}()")),
+            "{name} is production code and must stay visible: {production}"
+        );
+    }
+    for hidden in ["Marker", "LOCK", "static S", "value: u8", "fn hidden"] {
+        assert!(
+            !production.contains(hidden),
+            "{hidden} is test-only and must be skipped: {production}"
+        );
+    }
+
+    let raw_writer = "pub(crate) async fn raw_writer(conn: &mut sqlx::PgConnection) {\n\
+    sqlx::query(\"INSERT INTO events (community_id, id) VALUES ($1, $2)\")\n\
+        .execute(conn)\n\
+        .await\n\
+        .expect(\"write\");\n\
+}\n";
+    for (test_item, hidden) in [
+        ("struct X;", "struct X"),
+        ("fn helper() {} // test helper", "fn helper"),
+        ("const BRACES: &str = \"{}\"; // fixture", "BRACES"),
+        (
+            "const URL: &str = \"https://relay.test\"; // fixture",
+            "relay.test",
+        ),
+        ("fn u() -> &'static str { \"ws://x\" } // c", "ws://x"),
+    ] {
+        let production = strip_cfg_test_items(&format!("#[cfg(test)]\n{test_item}\n{raw_writer}"));
+        assert!(
+            !production.contains(hidden),
+            "`{test_item}` is test-only and must be skipped: {production}"
+        );
+        assert!(
+            production_contains_guarded_write(&production),
+            "a guarded write after `{test_item}` must stay visible: {production}"
+        );
+        assert_eq!(
+            syntactic_guarded_write_route_violations(&production),
+            ["pub(crate) async fn raw_writer(conn: &mut sqlx::PgConnection) {"],
+            "a raw writer after `{test_item}` must still be scanned"
+        );
+    }
+}
+
 fn should_scan_guarded_write_source_file(path: &std::path::Path) -> bool {
     let file_name = path
         .file_name()
@@ -1188,33 +1379,38 @@ fn serving_table_writes_expose_syntactic_chokepoint_or_guarded_tx_routes() {
         }
     }
 
-    let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    collect_rs_files(&src_root, &mut files);
-    assert!(
-        !files.is_empty(),
-        "guarded-table scan must see production source files"
-    );
-
+    // `buzz-relay` is scanned too: relay code reaches fenced tables only through
+    // `buzz-db` helpers, and a direct relay write must meet the same rule.
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut checked_guarded_files = 0usize;
-    for path in files {
-        let relative = path
-            .strip_prefix(&src_root)
-            .expect("file is under src root")
-            .to_string_lossy()
-            .replace('\\', "/");
-        let source = std::fs::read_to_string(&path).expect("read source file");
-        let production = source.split("\n#[cfg(test)]").next().unwrap_or(&source);
-        if production_contains_guarded_write(production) {
-            checked_guarded_files += 1;
-            let violations = syntactic_guarded_write_route_violations(production);
-            assert!(
-                violations.is_empty(),
-                "{relative} has guarded-table INSERT/UPDATE/DELETE seams without a syntactic \
-                 route marker (tenant-local chokepoint call or caller-owned guarded \
-                 transaction/connection): {violations:?}; this source policy does not prove \
-                 provenance, so database fences remain the authoritative backstop"
-            );
+    for (crate_name, src_root) in [
+        ("buzz-db", manifest.join("src")),
+        ("buzz-relay", manifest.join("../buzz-relay/src")),
+    ] {
+        let mut files = Vec::new();
+        collect_rs_files(&src_root, &mut files);
+        assert!(
+            !files.is_empty(),
+            "guarded-table scan must see {crate_name} production source files"
+        );
+        for path in files {
+            let relative = path
+                .strip_prefix(&src_root)
+                .expect("file is under src root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let source = std::fs::read_to_string(&path).expect("read source file");
+            let production = strip_cfg_test_items(&source);
+            if production_contains_guarded_write(&production) {
+                checked_guarded_files += 1;
+                let violations = syntactic_guarded_write_route_violations(&production);
+                assert!(
+                    violations.is_empty(),
+                    "{crate_name}/src/{relative} has guarded-table INSERT/UPDATE/DELETE seams \
+                     that neither open the tenant-local chokepoint nor take `&mut AdmittedTx`: \
+                     {violations:?}"
+                );
+            }
         }
     }
     assert!(
@@ -1223,284 +1419,465 @@ fn serving_table_writes_expose_syntactic_chokepoint_or_guarded_tx_routes() {
     );
 }
 
-/// Transaction-provenance backstop for the routing check above.
-///
-/// That check accepts any function that takes a caller-owned transaction, so
-/// it cannot see who opened the transaction. This one walks one hop up: any
-/// production function in `buzz-db` or `buzz-relay` that calls a
-/// transaction-taking event-write helper without itself taking a transaction
-/// opened that transaction, so it must have admitted it. Database fences remain
-/// the authoritative backstop; this only keeps admission at entry.
-const TRANSACTION_ADMISSION_MARKERS: [&str; 5] = [
-    COMMUNITY_CHOKEPOINT_MARKER,
-    COMMUNITY_CHOKEPOINT_LEGACY_MARKER,
-    ".begin_event_write_transaction(",
-    ".guard_transaction(",
-    ".guard_transaction_with_serving_lease(",
+// Rolled-back verification probes write `events` rows that never commit, so
+// they owe no push job or TTL refresh.
+const EVENT_INSERT_FOLLOW_UP_EXCEPTIONS: [&str; 2] = [
+    "pub async fn verify_floor_guard_behavior(",
+    "pub async fn verify_channel_roster_fence_behavior(",
 ];
 
-fn function_name(function_source: &str) -> Option<&str> {
-    let header = function_header(function_source);
-    let after_fn = header.split_once("fn ")?.1;
-    let end = after_fn
-        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .unwrap_or(after_fn.len());
-    Some(&after_fn[..end])
-}
-
-fn function_body(function_source: &str) -> &str {
-    function_source.split_once('{').map_or("", |(_, body)| body)
-}
-
-fn called_helpers<'a>(body: &str, helpers: &'a std::collections::BTreeSet<String>) -> Vec<&'a str> {
-    helpers
-        .iter()
-        .filter(|helper| {
-            body.match_indices(helper.as_str()).any(|(index, _)| {
-                let preceded_by_identifier = body[..index]
-                    .chars()
-                    .next_back()
-                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
-                let rest = &body[index + helper.len()..];
-                !preceded_by_identifier && (rest.starts_with('(') || rest.starts_with("::<"))
-            })
-        })
-        .map(String::as_str)
-        .collect()
-}
-
-/// Production functions that open a transaction for an event-write helper
-/// without admitting it. `sources` holds `(label, production_source)` pairs;
-/// helpers are discovered from them, so the rule follows new helpers.
-fn unadmitted_event_write_transaction_openers(sources: &[(String, String)]) -> Vec<String> {
-    let functions: Vec<(&str, &str, &str)> = sources
-        .iter()
-        .flat_map(|(label, production)| {
-            function_slices(production)
-                .into_iter()
-                .map(move |function| (label.as_str(), production.as_str(), function))
-        })
-        .collect();
-
-    // Transaction-taking functions that write a fenced table, closed over
-    // transaction-taking functions that call one of them.
-    let mut helpers: std::collections::BTreeSet<String> = functions
-        .iter()
-        .filter(|(_, _, function)| {
-            function_accepts_guarded_transaction_or_connection(function)
-                && production_contains_guarded_write(function)
-        })
-        .filter_map(|(_, _, function)| function_name(function).map(str::to_owned))
-        .collect();
-    loop {
-        let discovered: Vec<String> = functions
-            .iter()
-            .filter(|(_, _, function)| function_accepts_guarded_transaction_or_connection(function))
-            .filter_map(|(_, _, function)| function_name(function).map(|name| (name, function)))
-            .filter(|(name, function)| {
-                !helpers.contains(*name)
-                    && !called_helpers(function_body(function), &helpers).is_empty()
-            })
-            .map(|(name, _)| name.to_owned())
-            .collect();
-        if discovered.is_empty() {
-            break;
-        }
-        helpers.extend(discovered);
-    }
-
-    functions
-        .iter()
-        .filter(|(_, production, function)| {
-            let header = function_header(function);
-            let admitted = TRANSACTION_ADMISSION_MARKERS
-                .iter()
-                .any(|marker| function.contains(marker))
-                || (function_uses_guarded_tx_adapter_state(function)
-                    && adapter_constructor_is_chokepoint_pinned(production, header));
-            !function_accepts_guarded_transaction_or_connection(function)
-                && !function_is_guarded_write_exception(header)
-                && !called_helpers(function_body(function), &helpers).is_empty()
-                && !admitted
-        })
-        .map(|(label, _, function)| format!("{label}: {}", function_header(function)))
-        .collect()
-}
-
-/// Remove each top-level `#[cfg(test)]` item and keep the production code
-/// around it. Truncating at the first `#[cfg(test)]` would hide production
-/// functions that follow a test-only item. Tracks brace depth: the item ends
-/// on the first line that leaves depth at or below zero and ends with `;` or
-/// `}`, ignoring a trailing `//` comment. A column-0 `}` line (rustfmt's
-/// top-level close) always ends it. Braces inside string or char literals are
-/// still counted, so a test-only item with unbalanced literal braces (for
-/// example `"{"`) runs on to the next column-0 `}`; no such item exists today.
+/// `source` with every `#[cfg(test)]` item removed, wherever it sits in the
+/// file. Each item runs to the `;` that ends it or to the brace that closes
+/// its body. Braces inside comments and literals are not counted (see
+/// [`mask_comments_and_literals`]). Unlike cutting the file at the first
+/// `#[cfg(test)]`, this keeps production code that follows a test-only item.
+/// The whole file is masked once and the marker is found in that view, so a
+/// mention in a comment or string (even a multiline one) strips nothing. The
+/// marker also counts only when it is the first code on its line.
 fn strip_cfg_test_items(source: &str) -> String {
+    const MARKER: &str = "#[cfg(test)]";
+    let masked = mask_comments_and_literals(source);
     let mut kept = String::with_capacity(source.len());
-    let mut lines = source.lines();
-    while let Some(line) = lines.next() {
-        if line != "#[cfg(test)]" {
-            kept.push_str(line);
-            kept.push('\n');
+    let mut copied = 0usize;
+    let mut search = 0usize;
+    while let Some(found) = masked[search..].find(MARKER) {
+        let at = search + found;
+        let line_start = masked[..at].rfind('\n').map_or(0, |newline| newline + 1);
+        search = at + MARKER.len();
+        if !masked[line_start..at].trim().is_empty() {
             continue;
         }
-        let mut depth = 0_isize;
-        for line in lines.by_ref().skip_while(|line| line.starts_with("#[")) {
-            depth += line.matches('{').count() as isize - line.matches('}').count() as isize;
-            // Any `//` may start the trailing comment (an earlier one can sit
-            // inside a string such as `"https://…"`), so try every prefix. A
-            // false match inside a string only ends the item early, which
-            // scans more lines and can never hide production code.
-            let item_end = depth <= 0
-                && line
-                    .match_indices("//")
-                    .map(|(at, _)| &line[..at])
-                    .chain([line])
-                    .any(|text| {
-                        let text = text.trim_end();
-                        text.ends_with(';') || text.ends_with('}')
-                    });
-            if item_end || line == "}" || line == "};" {
-                break;
-            }
-        }
+        kept.push_str(&source[copied..at]);
+        copied = search + cfg_test_item_len(&masked[search..]);
+        search = copied;
     }
+    kept.push_str(&source[copied..]);
     kept
 }
 
-#[test]
-fn cfg_test_items_are_skipped_without_hiding_later_production_code() {
-    let source = "pub fn before() {}\n\
-#[cfg(test)]\n\
-struct Marker;\n\
-pub fn after_struct() {}\n\
-#[cfg(test)]\n\
-static LOCK: std::sync::Mutex<()> =\n\
-    std::sync::Mutex::new(());\n\
-pub fn after_static() {}\n\
-#[cfg(test)]\n\
-static S: [u8; 1] =\n\
-    [const { 0 }; 1];\n\
-pub fn after_const_block() {}\n\
-#[cfg(test)]\n\
-#[derive(Debug)]\n\
-struct Fields {\n\
-    value: u8,\n\
-}\n\
-pub fn after_fields() {}\n\
-#[cfg(test)]\n\
-mod tests {\n\
-    fn hidden() {\n\
-    }\n\
-}\n\
-pub fn after_module() {}\n";
-    let production = strip_cfg_test_items(source);
-    for name in [
-        "before",
-        "after_struct",
-        "after_static",
-        "after_const_block",
-        "after_fields",
-        "after_module",
-    ] {
-        assert!(
-            production.contains(&format!("pub fn {name}()")),
-            "{name} is production code and must stay visible: {production}"
-        );
+/// Length of the item that starts `masked_item`, which must already be masked
+/// so braces in comments and literals are not counted.
+fn cfg_test_item_len(masked_item: &str) -> usize {
+    let mut depth = 0usize;
+    for (index, byte) in masked_item.bytes().enumerate() {
+        match byte {
+            b';' if depth == 0 => return index + 1,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return index + 1;
+                }
+            }
+            _ => {}
+        }
     }
-    for hidden in ["Marker", "LOCK", "static S", "value: u8", "fn hidden"] {
-        assert!(
-            !production.contains(hidden),
-            "{hidden} is test-only and must be skipped: {production}"
-        );
-    }
+    masked_item.len()
+}
 
-    let raw_opener = "pub async fn raw_opener(pool: &sqlx::PgPool) {\n\
-    let mut tx = pool.begin().await.expect(\"tx\");\n\
-    insert_row_in_transaction(&mut tx).await;\n\
-}\n\
-pub(crate) async fn insert_row_in_transaction(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) {\n\
-    sqlx::query(\"INSERT INTO events (community_id, id) VALUES ($1, $2)\")\n\
-        .execute(&mut **tx)\n\
-        .await\n\
-        .expect(\"write\");\n\
-}\n";
-    for (test_item, hidden) in [
-        ("struct X;", "struct X"),
-        ("fn helper() {} // test helper", "fn helper"),
-        ("const BRACES: &str = \"{}\"; // fixture", "BRACES"),
+/// Whether the `r` at `index` begins a raw literal token: `r"`, or the `br"` /
+/// `cr"` raw byte and C strings, rather than ending an identifier such as `for"`.
+fn raw_literal_prefix_starts_token(bytes: &[u8], index: usize) -> bool {
+    let is_ident = |at: Option<usize>| {
+        at.and_then(|at| bytes.get(at))
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    };
+    let before = index.checked_sub(1);
+    !is_ident(before)
+        || (matches!(before.map(|at| bytes[at]), Some(b'b' | b'c'))
+            && !is_ident(index.checked_sub(2)))
+}
+
+/// `source` with every comment (`//`, `///`, nested `/* */`) and every string,
+/// raw string, and char literal replaced by spaces, byte for byte. Newlines are
+/// kept, so offsets and line structure match `source`. Scans that look for
+/// code (braces, calls) read the masked text; scans that look for SQL read
+/// the original, because the SQL lives inside string literals.
+fn mask_comments_and_literals(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut masked = bytes.to_vec();
+    let mut blank = |from: usize, to: usize| {
+        for byte in &mut masked[from..to.min(bytes.len())] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    };
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let start = index;
+        match bytes[index] {
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                let mut depth = 0usize;
+                while index < bytes.len() {
+                    if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+                        depth += 1;
+                        index += 2;
+                    } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                        depth -= 1;
+                        index += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+            b'r' if matches!(bytes.get(index + 1), Some(b'"' | b'#'))
+                && raw_literal_prefix_starts_token(bytes, index)
+                && bytes.get(
+                    index
+                        + 1
+                        + bytes[index + 1..]
+                            .iter()
+                            .take_while(|byte| **byte == b'#')
+                            .count(),
+                ) == Some(&b'"') =>
+            {
+                let hashes = bytes[index + 1..]
+                    .iter()
+                    .take_while(|byte| **byte == b'#')
+                    .count();
+                let close = format!("\"{}", "#".repeat(hashes));
+                let body = index + 2 + hashes;
+                index = source[body..]
+                    .find(&close)
+                    .map_or(bytes.len(), |offset| body + offset + close.len());
+            }
+            b'"' => {
+                index += 1;
+                while index < bytes.len() && bytes[index] != b'"' {
+                    index += if bytes[index] == b'\\' { 2 } else { 1 };
+                }
+                index += 1;
+            }
+            b'\'' if char_literal_end(source, index).is_some() => {
+                index = char_literal_end(source, index).expect("guard matched");
+            }
+            _ => {
+                index += 1;
+                continue;
+            }
+        }
+        blank(start, index);
+    }
+    String::from_utf8(masked).expect("masking replaces whole ASCII-delimited spans")
+}
+
+/// The end (exclusive) of the char literal whose opening quote is at `start`,
+/// such as `'{'`, `'é'`, `'\''`, `'\x7f'`, or `'\u{1F600}'`. `None` for a
+/// lifetime, which has no closing quote.
+fn char_literal_end(source: &str, start: usize) -> Option<usize> {
+    // `start` holds an ASCII quote, so `start + 1` is a char boundary.
+    let rest = &source[start + 1..];
+    let body = if let Some(escape) = rest.strip_prefix('\\') {
+        // The longest escape is `\u{10FFFF}`: a backslash and 9 more bytes.
+        // Skip the escaped byte so `'\''` does not close on its own quote.
+        let close = escape.get(1..)?.find('\'')? + 1;
+        (close <= 9).then_some(1 + close)?
+    } else {
+        rest.chars().next()?.len_utf8()
+    };
+    rest[body..]
+        .starts_with('\'')
+        .then_some(start + 1 + body + 1)
+}
+
+#[test]
+fn masker_blanks_every_literal_form_and_keeps_code() {
+    for (input, expected) in [
+        // Raw strings with zero, one, or several `#`, and the `b`/`c` raw
+        // prefixes. Each body ends in `\`, which would escape the closing quote
+        // if the literal were scanned as a plain string.
+        (r#"a(r"\") {}"#, "a(    ) {}"),
+        (r###"a(r##"x"#{"##) {}"###, "a(           ) {}"),
+        (r##"a(br#"\"#) {}"##, "a(b      ) {}"),
+        (r#"a(br"\") {}"#, "a(b    ) {}"),
+        (r#"a(cr"\") {}"#, "a(c    ) {}"),
+        // Plain byte and C strings.
+        (r#"a(b"{") {}"#, "a(b   ) {}"),
+        (r#"a(c"{") {}"#, "a(c   ) {}"),
+        // Plain and escaped char literals.
         (
-            "const URL: &str = \"https://relay.test\"; // fixture",
-            "relay.test",
+            r"a('\'', '\\', '\n', '{') {}",
+            "a(    ,     ,     ,    ) {}",
         ),
-        ("fn u() -> &'static str { \"ws://x\" } // c", "ws://x"),
+        // Multi-byte and long-escape char literals. Each holds a brace, or
+        // hides one from a scan that misreads the literal's length.
+        ("a('é', '{') {}", "a(    ,    ) {}"),
+        (r"a('\u{1F600}', '{') {}", "a(           ,    ) {}"),
+        (r"a('\x7f', '{') {}", "a(      ,    ) {}"),
+        // Code that only looks like a literal stays as it is.
+        ("let r#type = 1; {}", "let r#type = 1; {}"),
+        ("fn f<'a>(x: &'a str) {}", "fn f<'a>(x: &'a str) {}"),
     ] {
-        let production = strip_cfg_test_items(&format!("#[cfg(test)]\n{test_item}\n{raw_opener}"));
-        assert!(
-            !production.contains(hidden),
-            "`{test_item}` is test-only and must be skipped: {production}"
-        );
-        let violations =
-            unadmitted_event_write_transaction_openers(&[("fixture".to_owned(), production)]);
         assert_eq!(
-            violations,
-            ["fixture: pub async fn raw_opener(pool: &sqlx::PgPool) {"],
-            "a raw opener after `{test_item}` must still be scanned"
+            mask_comments_and_literals(input),
+            expected,
+            "masking `{input}`"
         );
     }
 }
 
-#[test]
-fn event_write_constructor_docs_do_not_claim_compile_time_enforcement() {
-    let source = include_str!("../src/runtime/mod.rs");
-    let docs = source
-        .split_once("    /// Begin an event-write transaction admitted for `community`.")
-        .and_then(|(_, rest)| rest.split_once("    pub async fn begin_event_write_transaction("))
-        .map(|(docs, _)| docs)
-        .expect("constructor docs");
-    assert!(
-        !docs.contains("only public way"),
-        "Db::pool() and the pub *_in_transaction helpers still allow unadmitted transactions"
-    );
-    assert!(
-        docs.contains("The compiler does not enforce this"),
-        "the docs must say that enforcement is policy plus database fences, not types"
-    );
+/// Whether `source` inserts into `events` itself (not `event_mentions` or any
+/// other `events_*` table), in any letter case, across line breaks and string
+/// continuations, `\n`/`\t`/`\r` escapes, and with or without a `public.`
+/// schema prefix.
+fn inserts_events_row(source: &str) -> bool {
+    let mut normalized = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() || ch == '\\' {
+            if ch == '\\' && matches!(chars.peek(), Some('n' | 't' | 'r')) {
+                chars.next();
+            }
+            if !normalized.ends_with(' ') {
+                normalized.push(' ');
+            }
+        } else {
+            normalized.push(ch.to_ascii_lowercase());
+        }
+    }
+    ["insert into events", "insert into public.events"]
+        .iter()
+        .any(|marker| {
+            normalized.match_indices(marker).any(|(index, marker)| {
+                normalized[index + marker.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|next| !(next.is_ascii_alphanumeric() || next == '_'))
+            })
+        })
+}
+
+/// An events insert must run both follow-ups: the push enqueue and the
+/// pre-commit TTL refresh. `after_admitted_insert` does both; a writer that
+/// inserts inside a savepoint calls the two halves separately.
+///
+/// Only real calls count: a hook in a comment or a string literal does not.
+fn runs_event_follow_ups(function_source: &str) -> bool {
+    let code = mask_comments_and_literals(function_source);
+    code.contains("event_follow_up::after_admitted_insert(")
+        || (code.contains("event_follow_up::enqueue_push_match(")
+            && code.contains(".record_channel_event("))
+}
+
+fn event_insert_follow_up_violations(production_source: &str) -> Vec<String> {
+    function_slices(production_source)
+        .into_iter()
+        .filter(|function_source| {
+            let header = function_header(function_source);
+            inserts_events_row(function_source)
+                && !EVENT_INSERT_FOLLOW_UP_EXCEPTIONS
+                    .iter()
+                    .any(|exception| header.starts_with(exception))
+                && !runs_event_follow_ups(function_source)
+        })
+        .map(|function_source| function_header(function_source).to_owned())
+        .collect()
 }
 
 #[test]
-fn event_write_provenance_rejects_unadmitted_transaction_openers() {
-    let source = r#"
-pub(crate) async fn insert_row_in_transaction(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) {
+fn event_insert_follow_up_policy_rejects_writers_without_the_hook() {
+    let source = r##"
+pub(crate) async fn unhooked_writer(tx: &mut AdmittedTx) {
     sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
-        .execute(&mut **tx)
+        .execute(tx.conn())
         .await
         .expect("write");
 }
-pub(crate) async fn forward_in_transaction(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) {
-    insert_row_in_transaction(tx).await;
+pub(crate) async fn push_only_writer(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events \
+                 (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    crate::store::event_follow_up::enqueue_push_match(tx.conn(), community, id, kind)
+        .await
+        .expect("enqueue");
 }
-pub async fn admitted_opener(db: &Db, community: CommunityId) {
-    let mut tx = db.begin_event_write_transaction(community).await.expect("tx");
-    forward_in_transaction(&mut tx).await;
+pub(crate) async fn hooked_writer(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    crate::store::event_follow_up::after_admitted_insert(tx, id, kind, channel)
+        .await
+        .expect("follow up");
 }
-pub async fn raw_opener(pool: &sqlx::PgPool) {
-    let mut tx = pool.begin().await.expect("tx");
-    crate::store::forward_in_transaction(&mut tx).await;
+pub(crate) async fn savepoint_writer(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    crate::store::event_follow_up::enqueue_push_match(tx.conn(), community, id, kind)
+        .await
+        .expect("enqueue");
+    tx.record_channel_event(channel, kind);
+}
+pub(crate) async fn mention_writer(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO event_mentions (community_id, event_id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+pub async fn verify_floor_guard_behavior(pool: &PgPool) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(pool)
+        .await
+        .expect("probe");
+}
+pub(crate) async fn lowercase_writer(tx: &mut AdmittedTx) {
+    sqlx::query("insert into
+        public.events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+pub(crate) async fn continued_writer(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO \
+                 events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+/// Kept at module scope, not `#[cfg(test)]`, because production calls it.
+pub(crate) async fn writer_under_doc_mention(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+// see `#[cfg(test)] mod x {`
+pub(crate) async fn writer_under_brace_mention(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+pub(crate) async fn writer_with_escaped_newline(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO\nevents (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+pub(crate) async fn writer_with_commented_out_hook(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    // crate::store::event_follow_up::after_admitted_insert(tx, id, kind, channel)
+}
+pub(crate) async fn writer_with_block_commented_hook(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    /* crate::store::event_follow_up::enqueue_push_match(tx.conn(), community, id, kind)
+       /* nested */ tx.record_channel_event(channel, kind); */
+}
+pub(crate) async fn writer_with_hook_in_string(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    tracing::debug!("skipped event_follow_up::after_admitted_insert(tx, ..)");
+}
+pub(crate) async fn writer_with_nested_block_commented_hook(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    /* /* inner */ crate::store::event_follow_up::after_admitted_insert(tx, id, kind, channel) */
+}
+pub(crate) async fn writer_with_hook_after_escaped_quote(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    tracing::debug!("\"event_follow_up::after_admitted_insert(\"");
+}
+pub(crate) async fn writer_with_hook_in_raw_string(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+    tracing::debug!(r#""event_follow_up::after_admitted_insert(""#);
+}
+/*
+#[cfg(test)]
+*/
+pub(crate) async fn writer_after_block_commented_cfg_test(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+pub(crate) async fn writer_after_raw_string_example(tx: &mut AdmittedTx) {
+    let _example = r#"
+fn example() {
+    crate::store::event_follow_up::after_admitted_insert(tx, id, kind, channel)
 }
 "#;
-    let violations =
-        unadmitted_event_write_transaction_openers(&[("fixture".to_owned(), source.to_owned())]);
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+#[cfg(test)]
+fn test_only_helper() -> (&'static str, char, &'static str, char, &'static [u8]) {
+    // an unbalanced { in a comment
+    ("{", '{', r#"}"} {"#, '"', br#"\"#)
+}
+pub(crate) async fn writer_after_test_helper(tx: &mut AdmittedTx) {
+    sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+        .execute(tx.conn())
+        .await
+        .expect("write");
+}
+#[cfg(test)]
+mod tests {
+    async fn test_writer(pool: &PgPool) {
+        sqlx::query("INSERT INTO events (community_id, id) VALUES ($1, $2)")
+            .execute(pool)
+            .await
+            .expect("fixture");
+    }
+}
+"##;
+
     assert_eq!(
-        violations,
-        ["fixture: pub async fn raw_opener(pool: &sqlx::PgPool) {"],
-        "an opener that hands an unadmitted transaction to an event-write helper, even through \
-         a pass-through helper, must be rejected; an admitted opener must not"
+        event_insert_follow_up_violations(&strip_cfg_test_items(source)),
+        [
+            "pub(crate) async fn unhooked_writer(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn push_only_writer(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn lowercase_writer(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn continued_writer(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_under_doc_mention(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_under_brace_mention(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_escaped_newline(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_commented_out_hook(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_block_commented_hook(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_hook_in_string(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_nested_block_commented_hook(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_hook_after_escaped_quote(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_with_hook_in_raw_string(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_after_block_commented_cfg_test(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_after_raw_string_example(tx: &mut AdmittedTx) {",
+            "pub(crate) async fn writer_after_test_helper(tx: &mut AdmittedTx) {",
+        ],
+        "an events insert must run the push enqueue and record the TTL refresh"
     );
 }
 
 #[test]
-fn event_write_transactions_are_admitted_where_they_are_opened() {
+fn every_production_event_insert_runs_the_follow_up_hook() {
     use std::path::{Path, PathBuf};
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -1514,36 +1891,46 @@ fn event_write_transactions_are_admitted_where_they_are_opened() {
         }
     }
 
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut sources = Vec::new();
-    for (crate_name, src_root) in [
-        ("buzz-db", manifest.join("src")),
-        ("buzz-relay", manifest.join("../buzz-relay/src")),
-    ] {
-        let mut files = Vec::new();
-        collect_rs_files(&src_root, &mut files);
-        assert!(!files.is_empty(), "{crate_name} source must be scanned");
-        for path in files {
-            let relative = path
-                .strip_prefix(&src_root)
-                .expect("file is under src root")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let source = std::fs::read_to_string(&path).expect("read source file");
-            sources.push((
-                format!("{crate_name}/src/{relative}"),
-                strip_cfg_test_items(&source),
-            ));
+    let crates_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crate lives under crates/");
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(crates_root).expect("read crates directory") {
+        let src = entry.expect("read crates entry").path().join("src");
+        if src.is_dir() {
+            collect_rs_files(&src, &mut files);
         }
     }
 
-    let violations = unadmitted_event_write_transaction_openers(&sources);
+    let mut hooked_writers = 0usize;
+    let mut violations = Vec::new();
+    for path in files {
+        let source = std::fs::read_to_string(&path).expect("read source file");
+        let production = strip_cfg_test_items(&source);
+        if !inserts_events_row(&production) {
+            continue;
+        }
+        for function_source in function_slices(&production) {
+            if inserts_events_row(function_source) && runs_event_follow_ups(function_source) {
+                hooked_writers += 1;
+            }
+        }
+        violations.extend(
+            event_insert_follow_up_violations(&production)
+                .into_iter()
+                .map(|header| format!("{}: {header}", path.display())),
+        );
+    }
+
     assert!(
         violations.is_empty(),
-        "these functions open a transaction for an event-write helper without community \
-         admission; open it with Db::begin_event_write_transaction(community) or \
-         begin_community_event_write_transaction (this scan checks that admission is present, \
-         not that it precedes domain locks; per-path PostgreSQL tests pin ordering): \
-         {violations:?}"
+        "production `INSERT INTO events` writers must call `event_follow_up` so the push \
+         enqueue and channel TTL refresh survive the trigger retirement: {violations:?}"
+    );
+    // The seven writers at the time of BUZZ-176. A lower count means the scan
+    // stopped seeing a writer, not that one was removed safely.
+    assert!(
+        hooked_writers >= 7,
+        "expected at least seven hooked event writers, found {hooked_writers}"
     );
 }

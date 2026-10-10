@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:flutter/physics.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:buzz/shared/theme/buzz_icons.dart';
 
 import '../../shared/auth/auth.dart';
 import '../../shared/community/community_icon_provider.dart';
@@ -585,11 +585,14 @@ class _SettingsPageRoute extends PageRouteBuilder<void> {
   _SettingsPageRoute({
     required WidgetBuilder builder,
     required this.onTransitionProgress,
+    bool? opaque,
   }) : super(
          pageBuilder: (context, animation, secondaryAnimation) =>
              builder(context),
          transitionsBuilder: _buildSettingsTransition,
-         opaque: false,
+         // Stop compositing Home's UIKit controls once Settings has settled.
+         // Opaque routes still paint the previous page during both transitions.
+         opaque: opaque ?? defaultTargetPlatform == TargetPlatform.iOS,
          allowSnapshotting: false,
          transitionDuration: const Duration(milliseconds: 150),
          reverseTransitionDuration: const Duration(milliseconds: 150),
