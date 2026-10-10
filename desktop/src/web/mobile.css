@@ -349,6 +349,9 @@
   ) {
     -webkit-touch-callout: none;
     user-select: none;
+    /* Sideways moves are swipe-to-reply (mobile.ts), never a browser pan
+       that would cancel the touch mid-swipe. */
+    touch-action: pan-y;
   }
   [data-testid^="message-action-bar-"] {
     opacity: 0;
